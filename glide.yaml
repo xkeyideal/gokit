@@ -1,0 +1,8 @@
+package: github.com/xkeyideal/gokit
+import:
+- package: github.com/globalsign/mgo
+- package: github.com/nsqio/go-nsq
+- package: github.com/golang/snappy
+- package: github.com/gorilla/websocket
+- package: github.com/satori/go.uuid
+  version: v1.2.0
