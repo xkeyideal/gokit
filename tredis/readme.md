@@ -1,4 +1,5 @@
-# nsqdlb
+# tredis
+
     import "github.com/xkeyideal/gokit/tredis"
 
 1. 主动watch项目redis地址的变化
@@ -25,8 +26,23 @@ func cb(addr string, err error) {
 	}
 }
 
+func qcb(url, project, env string, client *httpkit.HttpClient) ([]string, error) {
+	resp, err := client.SetBasicAuth(project, project).Get(url)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("uri error: %s, code: %d", resp.Status, resp.StatusCode)
+	}
+
+	// do something for resolving redis ip addresses
+
+	return []string{"127.0.0.1:6379","127.0.0.1:6380","127.0.0.1:6381"}, nil
+}
+
 func main() {
-	client, err := tredis.NewTRedisWatchClient(wsurl, cmdName, watchKey, env, httpUrl, projects, cb)
+	client, err := tredis.NewTRedisWatchClient(wsurl, cmdName, watchKey, env, httpUrl, projects, cb, qcb)
 	if err != nil {
 		fmt.Println("err11: ", err)
 		return
