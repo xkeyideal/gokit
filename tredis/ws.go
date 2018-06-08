@@ -23,21 +23,24 @@ const (
 
 type ErrCb func(err error)
 
+type QueryTRedisAddrsCb func(url, project, env string, client *httpkit.HttpClient) ([]string, error)
+
 type TRedisWatchClient struct {
-	wsurl      string
-	httpurl    string
-	cmdName    string
-	watchKey   string
-	uuid       string
-	env        string
-	projects   map[string]struct{}
-	conn       *websocket.Conn
-	ticker     *time.Ticker
-	sendChan   chan []byte
-	exitChan   chan struct{}
-	wg         sync.WaitGroup
-	httpClient *httpkit.HttpClient
-	errCb      ErrCb
+	wsurl              string
+	httpurl            string
+	cmdName            string
+	watchKey           string
+	uuid               string
+	env                string
+	projects           map[string]struct{}
+	conn               *websocket.Conn
+	ticker             *time.Ticker
+	sendChan           chan []byte
+	exitChan           chan struct{}
+	wg                 sync.WaitGroup
+	httpClient         *httpkit.HttpClient
+	errCb              ErrCb
+	queryTRedisAddrsCb QueryTRedisAddrsCb
 
 	ChangeChan chan *TRedisWatchResp
 }
@@ -61,7 +64,7 @@ type readMessageProtocol struct {
 	ReturnValue string `json:"returnValue"`
 }
 
-func NewTRedisWatchClient(wsurl, cmdName, watchKey, env, httpurl string, projects []string, cb ErrCb) (*TRedisWatchClient, error) {
+func NewTRedisWatchClient(wsurl, cmdName, watchKey, env, httpurl string, projects []string, cb ErrCb, qcb QueryTRedisAddrsCb) (*TRedisWatchClient, error) {
 	fmt.Println(wsurl)
 	conn, _, err := websocket.DefaultDialer.Dial(wsurl, nil)
 	if err != nil {
@@ -69,19 +72,20 @@ func NewTRedisWatchClient(wsurl, cmdName, watchKey, env, httpurl string, project
 	}
 
 	client := &TRedisWatchClient{
-		conn:       conn,
-		wsurl:      wsurl,
-		projects:   make(map[string]struct{}),
-		cmdName:    cmdName,
-		watchKey:   watchKey,
-		env:        env,
-		httpurl:    httpurl,
-		uuid:       uuid.NewV4().String(),
-		sendChan:   make(chan []byte, 2),
-		exitChan:   make(chan struct{}),
-		ticker:     time.NewTicker(pingDuration),
-		ChangeChan: make(chan *TRedisWatchResp, len(projects)),
-		errCb:      cb,
+		conn:               conn,
+		wsurl:              wsurl,
+		projects:           make(map[string]struct{}),
+		cmdName:            cmdName,
+		watchKey:           watchKey,
+		env:                env,
+		httpurl:            httpurl,
+		uuid:               uuid.NewV4().String(),
+		sendChan:           make(chan []byte, 2),
+		exitChan:           make(chan struct{}),
+		ticker:             time.NewTicker(pingDuration),
+		ChangeChan:         make(chan *TRedisWatchResp, len(projects)),
+		errCb:              cb,
+		queryTRedisAddrsCb: qcb,
 
 		httpClient: httpkit.NewHttpClient(httpRwTimeout, httpRetry, httpRetryInterval, httpConnTimout, nil),
 	}
@@ -203,7 +207,8 @@ func (client *TRedisWatchClient) read() {
 			if len(ss) == 2 {
 				if r.CmdName == "projectkeyconfigchange" && ss[1] == client.watchKey {
 					project := ss[0]
-					ips, err := client.queryTRedisClusterIps(project)
+					url := fmt.Sprintf(client.httpurl, client.env, project)
+					ips, err := client.queryTRedisAddrsCb(url, project, client.env, client.httpClient)
 
 					select {
 					case client.ChangeChan <- &TRedisWatchResp{
