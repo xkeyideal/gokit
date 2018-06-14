@@ -33,6 +33,20 @@ func NewMongoFactoryWithDsn(dsn string, connTimeoutMs, maxOpenConn int) (factory
 	return
 }
 
+func NewMongoFactorySecondaryWithDsn(dsn string, connTimeoutMs, maxOpenConn int) (factory *MongoFactory, err error) {
+
+	session, err := mgo.DialWithTimeout(dsn, time.Duration(connTimeoutMs)*time.Millisecond)
+	if err != nil {
+		return
+	}
+	session.SetMode(mgo.SecondaryPreferred, true)
+	session.SetPoolLimit(maxOpenConn)
+	session.SetSyncTimeout(DefReadTimeout * time.Millisecond)
+
+	factory = &MongoFactory{session: session}
+	return
+}
+
 func NewMongoFactoryDirectWithDsn(dsn string, connTimeoutMs, maxOpenConn int) (factory *MongoFactory, err error) {
 
 	session, err := mgo.DialWithTimeout(dsn, time.Duration(connTimeoutMs)*time.Millisecond)
