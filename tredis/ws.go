@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/xkeyideal/gokit/httpkit"
@@ -19,6 +20,9 @@ const (
 	httpConnTimout    = 2 * time.Second //连接超时2秒
 	httpRetry         = 3               // 重试1次
 	httpRetryInterval = 2 * time.Second //重试间隔2秒
+
+	StateDisconnected = 1
+	StateConnected    = 2
 )
 
 type ErrCb func(err error)
@@ -41,6 +45,7 @@ type TRedisWatchClient struct {
 	httpClient         *httpkit.HttpClient
 	errCb              ErrCb
 	queryTRedisAddrsCb QueryTRedisAddrsCb
+	connected          int32
 
 	ChangeChan chan *TRedisWatchResp
 }
@@ -65,7 +70,6 @@ type readMessageProtocol struct {
 }
 
 func NewTRedisWatchClient(wsurl, cmdName, watchKey, env, httpurl string, projects []string, cb ErrCb, qcb QueryTRedisAddrsCb) (*TRedisWatchClient, error) {
-	fmt.Println(wsurl)
 	conn, _, err := websocket.DefaultDialer.Dial(wsurl, nil)
 	if err != nil {
 		return nil, err
@@ -102,6 +106,8 @@ func NewTRedisWatchClient(wsurl, cmdName, watchKey, env, httpurl string, project
 		Env:     client.env,
 		Args:    args,
 	}
+
+	atomic.StoreInt32(&client.connected, StateConnected)
 
 	b, _ := json.Marshal(w)
 
@@ -169,7 +175,17 @@ func (client *TRedisWatchClient) AddProject(project string) {
 	return
 }
 
+func (client *TRedisWatchClient) Status() int32 {
+	return atomic.LoadInt32(&client.connected)
+}
+
 func (client *TRedisWatchClient) Close() {
+	if atomic.LoadInt32(&client.connected) == StateDisconnected {
+		return
+	}
+
+	atomic.StoreInt32(&client.connected, StateDisconnected)
+
 	client.ticker.Stop()
 	close(client.exitChan)
 	client.wg.Wait()
@@ -185,12 +201,16 @@ func (client *TRedisWatchClient) read() {
 			goto exit
 		default:
 			typ, message, err := client.conn.ReadMessage()
-			if typ != websocket.TextMessage && typ != websocket.BinaryMessage {
-				continue
+
+			// 按照websocket包的官方说法，这里需要退出循环，至于重连需要在应用程序中解决
+			if err != nil {
+				client.wg.Done()
+				client.Close()
+				return
 			}
 
-			if err != nil {
-				client.errCb(err)
+			if typ != websocket.TextMessage && typ != websocket.BinaryMessage {
+				continue
 			}
 
 			r := readMessageProtocol{}
@@ -244,7 +264,6 @@ func (client *TRedisWatchClient) write() {
 				client.errCb(err)
 			}
 		case message := <-client.sendChan:
-			fmt.Println(string(message))
 			client.conn.WriteMessage(websocket.TextMessage, message)
 		}
 	}
