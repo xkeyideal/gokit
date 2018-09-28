@@ -70,6 +70,55 @@ func NewError(format string, a ...interface{}) error {
 	return errors.New(msg)
 }
 
+func fileExist(filepath string) bool {
+	_, err := os.Stat(filepath)
+	if err == nil {
+		return true
+	}
+	if os.IsNotExist(err) {
+		return false
+	}
+
+	return false
+}
+
+func (fileLog *FileLog) reopenCheck() {
+	ticker := time.NewTicker(120 * time.Second)
+
+	for range ticker.C {
+		normalLog := fileLog.filepath + "/" + fileLog.filename + ".log"
+		if !fileExist(normalLog) {
+			file, err := fileLog.openFile(normalLog)
+			if err == nil {
+				fileLog.Lock()
+				if fileLog.file != nil {
+					fileLog.file.Close()
+				}
+				fileLog.file = file
+				fileLog.normalMaxSizeCurSize = 0
+				fileLog.normalMaxLinesCurLines = 0
+				fileLog.Unlock()
+			}
+		}
+
+		warnLog := normalLog + ".wf"
+		if !fileExist(warnLog) {
+			errFile, err := fileLog.openFile(warnLog)
+			if err == nil {
+				fileLog.Lock()
+				if fileLog.errFile != nil {
+					fileLog.errFile.Close()
+				}
+				fileLog.errFile = errFile
+				fileLog.errMaxSizeCurSize = 0
+				fileLog.errMaxLinesCurLines = 0
+				fileLog.Unlock()
+			}
+		}
+	}
+
+}
+
 func newFileLog() *FileLog {
 	return &FileLog{
 		filename: "log_filename",

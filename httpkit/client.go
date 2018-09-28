@@ -14,7 +14,7 @@ import (
 
 type HttpClient struct {
 	c                *http.Client
-	rwTimeout        int
+	rwTimeout        time.Duration
 	params           url.Values
 	headers          http.Header
 	cookie           *http.Cookie
@@ -27,7 +27,7 @@ type HttpClient struct {
 	retryInterval    time.Duration
 }
 
-func NewHttpClient(rwTimeout, retry int, retryInterval, connTimeout time.Duration, tlsCfg *tls.Config) *HttpClient {
+func NewHttpClient(rwTimeout time.Duration, retry int, retryInterval, connTimeout time.Duration, tlsCfg *tls.Config) *HttpClient {
 	tr := &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   connTimeout,
@@ -43,7 +43,12 @@ func NewHttpClient(rwTimeout, retry int, retryInterval, connTimeout time.Duratio
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 
-	client := &http.Client{Transport: tr}
+	client := &http.Client{
+		Transport: tr,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 
 	return &HttpClient{
 		c:             client,
@@ -73,6 +78,11 @@ func (client *HttpClient) AddParam(key, value string) *HttpClient {
 	return client
 }
 
+func (client *HttpClient) AddParams(params url.Values) *HttpClient {
+	client.params = params
+	return client
+}
+
 func (client *HttpClient) SetParams(kvs map[string]string) *HttpClient {
 	for key, value := range kvs {
 		client.params.Set(key, value)
@@ -96,6 +106,11 @@ func (client *HttpClient) SetHeaders(kvs map[string]string) *HttpClient {
 		client.headers.Set(key, value)
 	}
 
+	return client
+}
+
+func (client *HttpClient) AddHeaders(headers http.Header) *HttpClient {
+	client.headers = headers
 	return client
 }
 
@@ -137,6 +152,10 @@ func (client *HttpClient) Head(targetUrl string) (*AdvanceResponse, error) {
 	return client.do("HEAD", targetUrl)
 }
 
+func (client *HttpClient) Do(method, targetUrl string) (*AdvanceResponse, error) {
+	return client.do(method, targetUrl)
+}
+
 func (client *HttpClient) do(method, targetUrl string) (*AdvanceResponse, error) {
 	u, err := url.Parse(targetUrl)
 	if err != nil {
@@ -165,7 +184,7 @@ func (client *HttpClient) do(method, targetUrl string) (*AdvanceResponse, error)
 	}
 
 	if client.rwTimeout > 0 {
-		ctx, cancel := context.WithTimeout(req.Context(), time.Duration(client.rwTimeout)*time.Second)
+		ctx, cancel := context.WithTimeout(req.Context(), client.rwTimeout)
 		defer cancel()
 		req = req.WithContext(ctx)
 	}
@@ -178,6 +197,12 @@ func (client *HttpClient) do(method, targetUrl string) (*AdvanceResponse, error)
 		for i := 0; i < client.retry; i++ {
 			resp, err2 = client.c.Do(req)
 			if err2 != nil {
+				time.Sleep(client.retryInterval)
+				continue
+			}
+
+			// 非2xx 或 3xx的状态码也认为是服务端响应出错，需重试
+			if !(resp.StatusCode >= 200 && resp.StatusCode < 400) {
 				time.Sleep(client.retryInterval)
 				continue
 			}

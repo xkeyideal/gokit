@@ -100,6 +100,8 @@ func NewTcLog(filepath, filename, level string) (*TcLog, error) {
 		return nil, err
 	}
 
+	go log.fileLog.reopenCheck()
+
 	go log.startLogger()
 
 	return log, nil

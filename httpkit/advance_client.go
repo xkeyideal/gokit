@@ -35,7 +35,12 @@ func NewAdvanceHttpClient(scheme, host string, connTimeout time.Duration, tlsCfg
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 
-	client := &http.Client{Transport: tr}
+	client := &http.Client{
+		Transport: tr,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 
 	return &AdvanceHttpClient{
 		scheme: scheme,
@@ -169,6 +174,10 @@ func (client *AdvanceHttpClient) Head(uri string, setting *AdvanceSettings) (*Ad
 	return client.do("HEAD", uri, setting)
 }
 
+func (client *AdvanceHttpClient) Do(method, targetUrl string, setting *AdvanceSettings) (*AdvanceResponse, error) {
+	return client.do(method, targetUrl, setting)
+}
+
 func (client *AdvanceHttpClient) do(method, uri string, setting *AdvanceSettings) (*AdvanceResponse, error) {
 	url := setting.urlString(client.scheme, client.host, uri)
 
@@ -205,6 +214,12 @@ func (client *AdvanceHttpClient) do(method, uri string, setting *AdvanceSettings
 		for i := 0; i < setting.retry; i++ {
 			resp, err2 = client.client.Do(req)
 			if err2 != nil {
+				time.Sleep(setting.retryInterval)
+				continue
+			}
+
+			// 非2xx 或 3xx的状态码也认为是服务端响应出错，需重试
+			if !(resp.StatusCode >= 200 && resp.StatusCode < 400) {
 				time.Sleep(setting.retryInterval)
 				continue
 			}
