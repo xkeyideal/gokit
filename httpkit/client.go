@@ -192,7 +192,7 @@ func (client *HttpClient) do(method, targetUrl string) (*AdvanceResponse, error)
 	var resp *http.Response
 	var err2 error
 
-	startTime := time.Now().Nanosecond()
+	startTime := time.Now()
 	if client.retry > 0 {
 		for i := 0; i < client.retry; i++ {
 			resp, err2 = client.c.Do(req)
@@ -216,15 +216,12 @@ func (client *HttpClient) do(method, targetUrl string) (*AdvanceResponse, error)
 		return nil, err2
 	}
 
-	endTime := time.Now().Nanosecond()
-
 	defer resp.Body.Close()
 
 	adresp := &AdvanceResponse{
 		Header:     resp.Header,
 		StatusCode: resp.StatusCode,
 		Status:     resp.Status,
-		Time:       endTime - startTime,
 	}
 
 	if client.gzip && resp.Header.Get("Content-Encoding") == "gzip" {
@@ -239,6 +236,7 @@ func (client *HttpClient) do(method, targetUrl string) (*AdvanceResponse, error)
 		}
 
 		adresp.Body = body
+		adresp.Time = int64(time.Now().Sub(startTime))
 
 		return adresp, nil
 	}
@@ -249,6 +247,7 @@ func (client *HttpClient) do(method, targetUrl string) (*AdvanceResponse, error)
 	}
 
 	adresp.Body = body
+	adresp.Time = int64(time.Now().Sub(startTime))
 
 	return adresp, nil
 }

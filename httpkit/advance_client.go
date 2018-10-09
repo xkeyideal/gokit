@@ -69,7 +69,7 @@ type AdvanceResponse struct {
 	Header     http.Header
 	StatusCode int
 	Status     string
-	Time       int
+	Time       int64
 }
 
 func NewAdvanceSettings(rwTimeout, retry int, retryInterval time.Duration) *AdvanceSettings {
@@ -209,7 +209,7 @@ func (client *AdvanceHttpClient) do(method, uri string, setting *AdvanceSettings
 	var resp *http.Response
 	var err2 error
 
-	startTime := time.Now().Nanosecond()
+	startTime := time.Now()
 	if setting.retry > 0 {
 		for i := 0; i < setting.retry; i++ {
 			resp, err2 = client.client.Do(req)
@@ -233,15 +233,12 @@ func (client *AdvanceHttpClient) do(method, uri string, setting *AdvanceSettings
 		return nil, err2
 	}
 
-	endTime := time.Now().Nanosecond()
-
 	defer resp.Body.Close()
 
 	adresp := &AdvanceResponse{
 		Header:     resp.Header,
 		StatusCode: resp.StatusCode,
 		Status:     resp.Status,
-		Time:       endTime - startTime,
 	}
 
 	if setting.gzip && resp.Header.Get("Content-Encoding") == "gzip" {
@@ -256,6 +253,7 @@ func (client *AdvanceHttpClient) do(method, uri string, setting *AdvanceSettings
 		}
 
 		adresp.Body = body
+		adresp.Time = int64(time.Now().Sub(startTime))
 
 		return adresp, nil
 	}
@@ -266,6 +264,7 @@ func (client *AdvanceHttpClient) do(method, uri string, setting *AdvanceSettings
 	}
 
 	adresp.Body = body
+	adresp.Time = int64(time.Now().Sub(startTime))
 
 	return adresp, nil
 }
