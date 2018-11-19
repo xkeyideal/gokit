@@ -246,7 +246,7 @@ func (log *TcLog) writeMsg(logLevel int, msg string) {
 	when := time.Now().In(cstLocal)
 	if log.enableFuncCallDepth {
 		runInfo := log.getRuntimeInfo(log.logFuncCallDepth)
-		msg = fmt.Sprintf("[func:%s file:%s line:%d] %s", runInfo["xx_func"], runInfo["xx_file"], runInfo["xx_line"], msg)
+		msg = fmt.Sprintf("func:%s file:%s line:%d %s", runInfo["xx_func"], runInfo["xx_file"], runInfo["xx_line"], msg)
 	}
 
 	lm := logMsgPool.Get().(*logMsg)

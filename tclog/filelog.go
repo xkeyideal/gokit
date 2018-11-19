@@ -249,7 +249,7 @@ func (fileLog *FileLog) needRotate(size int, day int, normal bool) bool {
 func (fileLog *FileLog) WriteMsg(hostname string, when time.Time, msg string, level int) error {
 	h, d := formatTimeHeader(when)
 
-	msg = fmt.Sprintf("%s %s [%s] %s\n", strings.TrimSpace(string(h)), hostname, levelTextArray[level], msg)
+	msg = fmt.Sprintf("%s %s %s %s\n", strings.TrimSpace(string(h)), hostname, levelTextArray[level], msg)
 	var msgLength int
 	msgLength = len(msg)
 
