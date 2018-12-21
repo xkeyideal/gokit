@@ -1,6 +1,7 @@
 package httpkit
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/tls"
@@ -20,6 +21,7 @@ type HttpClient struct {
 	headers          http.Header
 	cookie           *http.Cookie
 	body             io.Reader
+	rawBody          []byte //原始body备份使用，retry的时候使用
 	baseAuth         bool
 	baseAuthUsername string
 	baseAuthPassword string
@@ -131,12 +133,15 @@ func (client *HttpClient) SetBasicAuth(username, password string) *HttpClient {
 }
 
 func (client *HttpClient) SetBody(body io.Reader) *HttpClient {
-	client.body = body
+	rawBody, _ := ioutil.ReadAll(body)
+	client.body = bytes.NewBuffer(rawBody)
+	client.rawBody = rawBody
 	return client
 }
 
 func (client *HttpClient) Get(targetUrl string) (*AdvanceResponse, error) {
 	client.body = nil
+	client.rawBody = []byte{}
 	return client.do("GET", targetUrl)
 }
 
@@ -227,12 +232,14 @@ func (client *HttpClient) do(method, targetUrl string) (*AdvanceResponse, error)
 
 		if err2 != nil {
 			time.Sleep(client.retryInterval)
+			client.body = bytes.NewBuffer(client.rawBody)
 			continue
 		}
 
 		// 非2xx 或 3xx的状态码也认为是服务端响应出错，需重试
 		if !(resp.StatusCode >= 200 && resp.StatusCode < 400) {
 			time.Sleep(client.retryInterval)
+			client.body = bytes.NewBuffer(client.rawBody)
 			continue
 		}
 

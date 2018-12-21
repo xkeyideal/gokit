@@ -1,6 +1,7 @@
 package httpkit
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/tls"
@@ -57,6 +58,7 @@ type AdvanceSettings struct {
 	headers          http.Header
 	cookie           *http.Cookie
 	body             io.Reader
+	rawBody          []byte
 	baseAuth         bool
 	baseAuthUsername string
 	baseAuthPassword string
@@ -143,7 +145,9 @@ func (setting *AdvanceSettings) SetCookie(cookie *http.Cookie) *AdvanceSettings 
 }
 
 func (setting *AdvanceSettings) SetBody(body io.Reader) *AdvanceSettings {
-	setting.body = body
+	rawBody, _ := ioutil.ReadAll(body)
+	setting.body = bytes.NewBuffer(rawBody)
+	setting.rawBody = rawBody
 	return setting
 }
 
@@ -156,6 +160,7 @@ func (setting *AdvanceSettings) SetBasicAuth(username, password string) *Advance
 
 func (client *AdvanceHttpClient) Get(uri string, setting *AdvanceSettings) (*AdvanceResponse, error) {
 	setting.body = nil
+	setting.rawBody = []byte{}
 	return client.do("GET", uri, setting)
 }
 
@@ -246,12 +251,14 @@ func (client *AdvanceHttpClient) do(method, uri string, setting *AdvanceSettings
 
 		if err2 != nil {
 			time.Sleep(setting.retryInterval)
+			setting.body = bytes.NewBuffer(setting.rawBody)
 			continue
 		}
 
 		// 非2xx 或 3xx的状态码也认为是服务端响应出错，需重试
 		if !(resp.StatusCode >= 200 && resp.StatusCode < 400) {
 			time.Sleep(setting.retryInterval)
+			setting.body = bytes.NewBuffer(setting.rawBody)
 			continue
 		}
 

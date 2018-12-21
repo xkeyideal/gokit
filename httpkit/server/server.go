@@ -1,0 +1,89 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"gatewaycenter/tools"
+	"hotel-price-client/config"
+	"io/ioutil"
+	"net/http"
+	"os"
+
+	"github.com/gin-gonic/gin"
+)
+
+var server *http.Server
+var router *gin.Engine
+
+type TestData struct {
+	Name string `json:"name"`
+}
+
+func main() {
+	router = gin.Default()
+	router.POST("/test", func(c *gin.Context) {
+		bytes, err := ioutil.ReadAll(c.Request.Body)
+		if err != nil {
+			SetStrResp(http.StatusBadRequest, tools.HTTP_BODY_ERR, err.Error(), "", c)
+			return
+		}
+
+		data := TestData{}
+		json.Unmarshal(bytes, &data)
+		fmt.Println(data)
+
+		SetStrResp(500, 0, "OK", "123", c)
+
+		return
+	})
+
+	server = &http.Server{
+		Addr:    fmt.Sprintf("0.0.0.0:12745"),
+		Handler: router,
+	}
+
+	fmt.Printf("hotel-price-client runing %s port %s \n", config.SystemCfg.RunEnv, config.SystemCfg.Port)
+
+	if err := server.ListenAndServe(); err != nil {
+		fmt.Println("listenAndServe error ", err.Error())
+		os.Exit(-1)
+	}
+}
+
+const (
+	JSON_UNMARSHAL = 1000
+	HTTP_BODY_ERR  = 1001
+
+	SERVER_ERR = 2000
+	RPC_ERR    = 2001
+)
+
+var errCodeMsg = map[int]string{
+	JSON_UNMARSHAL: "[JSON 反序列化异常]: ",
+	HTTP_BODY_ERR:  "[HTTP BODY读取异常]: ",
+
+	SERVER_ERR: "[选择后端节点异常]: ",
+	RPC_ERR:    "[远端服务器调用出错]: ",
+}
+
+func SetStrResp(httpCode, code int, msg string, result interface{}, c *gin.Context) {
+
+	m := msg
+
+	if v, ok := errCodeMsg[code]; ok {
+		m = fmt.Sprintf("%s%s", v, msg)
+	}
+
+	if code == 0 {
+		c.JSON(httpCode, gin.H{
+			"code":   code,
+			"msg":    m,
+			"result": result,
+		})
+	} else {
+		c.JSON(httpCode, gin.H{
+			"code": code,
+			"msg":  m,
+		})
+	}
+}
