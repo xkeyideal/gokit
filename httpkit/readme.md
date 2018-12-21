@@ -13,7 +13,7 @@
 ### func NewTcLog
 
 ``` go
-func NewHttpClient(rwTimeout, retry int, retryInterval, connTimeout time.Duration, tlsCfg *tls.Config) *HttpClient
+func NewHttpClient(rwTimeout time.Duration, retry int, retryInterval, connTimeout time.Duration, tlsCfg *tls.Config) *HttpClient
 ```
 
 初始化http client，设置读写超时、重试次数、重试间隔、连接超时、TLS配置
@@ -28,7 +28,7 @@ func NewAdvanceHttpClient(scheme, host string, connTimeout time.Duration, tlsCfg
 初始化一个长连接的http client，可以按照host作为map的存储key
 
 ```go
-func NewAdvanceSettings(rwTimeout, retry int, retryInterval time.Duration) *AdvanceSettings
+func NewAdvanceSettings(rwTimeout time.Duration, retry int, retryInterval time.Duration) *AdvanceSettings
 ```
 
 设置http client每次请求的参数
