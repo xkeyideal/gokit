@@ -13,7 +13,7 @@ var (
 	Username = "xxxxx"
 	Password = "123456789"
 
-	RwTimeout     = 5               // 读写超时5秒
+	RwTimeout     = 5 * time.Second // 读写超时5秒
 	ConnTimout    = 2 * time.Second //连接超时2秒
 	Retry         = 1               // 重试1次
 	RetryInterval = 2 * time.Second //重试间隔2秒

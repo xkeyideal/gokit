@@ -3,6 +3,11 @@
     import "github.com/xkeyideal/gokit/httpkit"
 	
 
+## 使用须知
+
+> * simple client 的url参数中不能存在query参数，请预先使用client.SetParam等方法设置query参数，否则程序会报错
+> * advance client 的uri参数中不能存在query参数，请预先使用setting.SetParam等方法设置query参数，否则程序会报错
+
 ## Simple Client
 
 ### func NewTcLog

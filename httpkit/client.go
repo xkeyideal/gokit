@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
@@ -25,6 +26,9 @@ type HttpClient struct {
 	gzip             bool
 	retry            int
 	retryInterval    time.Duration
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func NewHttpClient(rwTimeout time.Duration, retry int, retryInterval, connTimeout time.Duration, tlsCfg *tls.Config) *HttpClient {
@@ -156,10 +160,14 @@ func (client *HttpClient) Do(method, targetUrl string) (*AdvanceResponse, error)
 	return client.do(method, targetUrl)
 }
 
-func (client *HttpClient) do(method, targetUrl string) (*AdvanceResponse, error) {
+func (client *HttpClient) genHttpRequest(method, targetUrl string) (*http.Request, error) {
 	u, err := url.Parse(targetUrl)
 	if err != nil {
 		return nil, err
+	}
+
+	if u.RawQuery != "" {
+		return nil, fmt.Errorf("url中不能存在query参数[%s]，请使用client.SetParam等方法预设置", u.RawQuery)
 	}
 
 	u.RawQuery = client.params.Encode()
@@ -183,35 +191,54 @@ func (client *HttpClient) do(method, targetUrl string) (*AdvanceResponse, error)
 		req.SetBasicAuth(client.baseAuthUsername, client.baseAuthPassword)
 	}
 
-	if client.rwTimeout > 0 {
-		ctx, cancel := context.WithTimeout(req.Context(), client.rwTimeout)
-		defer cancel()
-		req = req.WithContext(ctx)
-	}
+	return req, nil
+}
 
+func (client *HttpClient) do(method, targetUrl string) (*AdvanceResponse, error) {
+
+	var ctx context.Context
+	var cancel context.CancelFunc
 	var resp *http.Response
 	var err2 error
 
-	startTime := time.Now()
-	if client.retry > 0 {
-		for i := 0; i < client.retry; i++ {
-			resp, err2 = client.c.Do(req)
-			if err2 != nil {
-				time.Sleep(client.retryInterval)
-				continue
-			}
-
-			// 非2xx 或 3xx的状态码也认为是服务端响应出错，需重试
-			if !(resp.StatusCode >= 200 && resp.StatusCode < 400) {
-				time.Sleep(client.retryInterval)
-				continue
-			}
-
-			break
-		}
+	if client.retry <= 0 {
+		client.retry = 1
 	} else {
-		resp, err2 = client.c.Do(req)
+		client.retry++
 	}
+
+	startTime := time.Now()
+	for i := 0; i < client.retry; i++ {
+		req, err := client.genHttpRequest(method, targetUrl)
+		if err != nil {
+			return nil, err
+		}
+
+		if client.rwTimeout > 0 {
+			ctx, cancel = context.WithTimeout(req.Context(), client.rwTimeout)
+			req = req.WithContext(ctx)
+		}
+
+		resp, err2 = client.c.Do(req)
+
+		if cancel != nil {
+			cancel()
+		}
+
+		if err2 != nil {
+			time.Sleep(client.retryInterval)
+			continue
+		}
+
+		// 非2xx 或 3xx的状态码也认为是服务端响应出错，需重试
+		if !(resp.StatusCode >= 200 && resp.StatusCode < 400) {
+			time.Sleep(client.retryInterval)
+			continue
+		}
+
+		break
+	}
+
 	if err2 != nil {
 		return nil, err2
 	}

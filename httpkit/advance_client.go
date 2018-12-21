@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
@@ -50,7 +51,7 @@ func NewAdvanceHttpClient(scheme, host string, connTimeout time.Duration, tlsCfg
 }
 
 type AdvanceSettings struct {
-	readWriteTimeout int
+	readWriteTimeout time.Duration
 	path             string
 	params           url.Values
 	headers          http.Header
@@ -72,7 +73,7 @@ type AdvanceResponse struct {
 	Time       int64
 }
 
-func NewAdvanceSettings(rwTimeout, retry int, retryInterval time.Duration) *AdvanceSettings {
+func NewAdvanceSettings(rwTimeout time.Duration, retry int, retryInterval time.Duration) *AdvanceSettings {
 	return &AdvanceSettings{
 		readWriteTimeout: rwTimeout,
 		params:           url.Values{},
@@ -178,9 +179,7 @@ func (client *AdvanceHttpClient) Do(method, targetUrl string, setting *AdvanceSe
 	return client.do(method, targetUrl, setting)
 }
 
-func (client *AdvanceHttpClient) do(method, uri string, setting *AdvanceSettings) (*AdvanceResponse, error) {
-	url := setting.urlString(client.scheme, client.host, uri)
-
+func genHttpRequest(method, url string, setting *AdvanceSettings) (*http.Request, error) {
 	req, err := http.NewRequest(method, url, setting.body)
 	if err != nil {
 		return nil, err
@@ -200,35 +199,65 @@ func (client *AdvanceHttpClient) do(method, uri string, setting *AdvanceSettings
 		req.SetBasicAuth(setting.baseAuthUsername, setting.baseAuthPassword)
 	}
 
-	if setting.readWriteTimeout > 0 {
-		ctx, cancel := context.WithTimeout(req.Context(), time.Duration(setting.readWriteTimeout)*time.Second)
-		defer cancel()
-		req = req.WithContext(ctx)
+	return req, nil
+}
+
+func (client *AdvanceHttpClient) do(method, uri string, setting *AdvanceSettings) (*AdvanceResponse, error) {
+	u, err := url.ParseRequestURI(uri)
+	if err != nil {
+		return nil, err
 	}
 
+	if u.RawQuery != "" {
+		return nil, fmt.Errorf("uri中不能存在query参数[%s]，请使用setting.SetParam等方法预设置", u.RawQuery)
+	}
+
+	url := setting.urlString(client.scheme, client.host, uri)
+
+	var ctx context.Context
+	var cancel context.CancelFunc
 	var resp *http.Response
 	var err2 error
 
-	startTime := time.Now()
-	if setting.retry > 0 {
-		for i := 0; i < setting.retry; i++ {
-			resp, err2 = client.client.Do(req)
-			if err2 != nil {
-				time.Sleep(setting.retryInterval)
-				continue
-			}
-
-			// 非2xx 或 3xx的状态码也认为是服务端响应出错，需重试
-			if !(resp.StatusCode >= 200 && resp.StatusCode < 400) {
-				time.Sleep(setting.retryInterval)
-				continue
-			}
-
-			break
-		}
+	if setting.retry <= 0 {
+		setting.retry = 1
 	} else {
-		resp, err2 = client.client.Do(req)
+		setting.retry++
 	}
+
+	startTime := time.Now()
+	for i := 0; i < setting.retry; i++ {
+		// solve Golang http post error : http: ContentLength=355 with Body length 0 bug
+		req, err := genHttpRequest(method, url, setting)
+		if err != nil {
+			return nil, err
+		}
+
+		if setting.readWriteTimeout > 0 {
+			ctx, cancel = context.WithTimeout(req.Context(), setting.readWriteTimeout)
+			req = req.WithContext(ctx)
+		}
+
+		resp, err2 = client.client.Do(req)
+
+		if cancel != nil {
+			cancel()
+		}
+
+		if err2 != nil {
+			time.Sleep(setting.retryInterval)
+			continue
+		}
+
+		// 非2xx 或 3xx的状态码也认为是服务端响应出错，需重试
+		if !(resp.StatusCode >= 200 && resp.StatusCode < 400) {
+			time.Sleep(setting.retryInterval)
+			continue
+		}
+
+		break
+	}
+
 	if err2 != nil {
 		return nil, err2
 	}
