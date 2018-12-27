@@ -13,6 +13,12 @@ Detailed documentation of the API is available at
 
 A [sub-package](https://godoc.org/github.com/globalsign/mgo/bson) that implements the [BSON](http://bsonspec.org) specification is also included, and may be used independently of the driver.
 
+## Supported Versions
+
+`mgo` is known to work well on (and has integration tests against) MongoDB v3.0, 3.2, 3.4 and 3.6. 
+
+MongoDB 4.0 is currently experimental - we would happily accept PRs to help improve support!
+
 ## Changes
 * Fixes attempting to authenticate before every query ([details](https://github.com/go-mgo/mgo/issues/254))
 * Removes bulk update / delete batch size limitations ([details](https://github.com/go-mgo/mgo/issues/288))
@@ -31,7 +37,7 @@ A [sub-package](https://godoc.org/github.com/globalsign/mgo/bson) that implement
 * Supports dropping all indexes on a collection ([details](https://github.com/globalsign/mgo/pull/25))
 * Annotates log entries/profiler output with optional appName on 3.4+ ([details](https://github.com/globalsign/mgo/pull/28))
 * Support for read-only [views](https://docs.mongodb.com/manual/core/views/) in 3.4+ ([details](https://github.com/globalsign/mgo/pull/33))
-* Support for [collations](https://docs.mongodb.com/manual/reference/collation/) in 3.4+ ([details](https://github.com/globalsign/mgo/pull/37))
+* Support for [collations](https://docs.mongodb.com/manual/reference/collation/) in 3.4+ ([details](https://github.com/globalsign/mgo/pull/37), [more](https://github.com/globalsign/mgo/pull/166))
 * Provide BSON constants for convenience/sanity ([details](https://github.com/globalsign/mgo/pull/41))
 * Consistently unmarshal time.Time values as UTC ([details](https://github.com/globalsign/mgo/pull/42))
 * Enforces best practise coding guidelines ([details](https://github.com/globalsign/mgo/pull/44))
@@ -49,6 +55,15 @@ A [sub-package](https://godoc.org/github.com/globalsign/mgo/bson) that implement
 * Add BSON stream encoders ([details](https://github.com/globalsign/mgo/pull/127))
 * Add integer map key support in the BSON encoder ([details](https://github.com/globalsign/mgo/pull/140)) 
 * Support aggregation [collations](https://docs.mongodb.com/manual/reference/collation/) ([details](https://github.com/globalsign/mgo/pull/144))
+* Support encoding of inline struct references ([details](https://github.com/globalsign/mgo/pull/146))
+* Improved windows test harness ([details](https://github.com/globalsign/mgo/pull/158))
+* Improved type and nil handling in the BSON codec ([details](https://github.com/globalsign/mgo/pull/147/files), [more](https://github.com/globalsign/mgo/pull/181))
+* Separated network read/write timeouts ([details](https://github.com/globalsign/mgo/pull/161))
+* Expanded dial string configuration options ([details](https://github.com/globalsign/mgo/pull/162))
+* Implement MongoTimestamp ([details](https://github.com/globalsign/mgo/pull/171))
+* Support setting `writeConcern` for `findAndModify` operations ([details](https://github.com/globalsign/mgo/pull/185))
+* Add `ssl` to the dial string options ([details](https://github.com/globalsign/mgo/pull/184))
+
 
 ---
 
@@ -59,23 +74,32 @@ A [sub-package](https://godoc.org/github.com/globalsign/mgo/bson) that implement
 * @BenLubar
 * @carldunham
 * @carter2000
+* @cedric-cordenier
 * @cezarsa
+* @DaytonG
+* @ddspog
 * @drichelson
 * @dvic
 * @eaglerayp
 * @feliixx
 * @fmpwizard
 * @gazoon
+* @gedge
 * @gnawux
 * @idy
 * @jameinel
+* @jefferickson
 * @johnlawsharrison
 * @KJTsanaktsidis
+* @larrycinnabar
 * @mapete94
 * @maxnoel
 * @mcspring
+* @Mei-Zhao
 * @peterdeka
 * @Reenjii
+* @roobre
 * @smoya
 * @steve-gray
+* @tbruyelle
 * @wgallagher
