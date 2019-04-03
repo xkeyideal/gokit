@@ -233,6 +233,10 @@ func (client *AdvanceHttpClient) do(method, uri string, setting *AdvanceSettings
 		// solve Golang http post error : http: ContentLength=355 with Body length 0 bug
 		err := client.doOnce(method, url, setting, adresp)
 		if err != nil {
+			// 达到retry的次数
+			if i == setting.retry-1 {
+				return nil, err
+			}
 			time.Sleep(setting.retryInterval)
 			setting.body = bytes.NewBuffer(setting.rawBody)
 			continue

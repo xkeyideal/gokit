@@ -215,6 +215,10 @@ func (client *HttpClient) do(method, targetUrl string) (*AdvanceResponse, error)
 	for i := 0; i < client.retry; i++ {
 		err := client.doOnce(method, targetUrl, adresp)
 		if err != nil {
+			// 达到retry的次数
+			if i == client.retry-1 {
+				return nil, err
+			}
 			time.Sleep(client.retryInterval)
 			client.body = bytes.NewBuffer(client.rawBody)
 			continue
