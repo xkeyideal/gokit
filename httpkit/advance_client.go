@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -219,44 +220,19 @@ func (client *AdvanceHttpClient) do(method, uri string, setting *AdvanceSettings
 
 	url := setting.urlString(client.scheme, client.host, uri)
 
-	var ctx context.Context
-	var cancel context.CancelFunc
-	var resp *http.Response
-	var err2 error
-
 	if setting.retry <= 0 {
 		setting.retry = 1
 	} else {
 		setting.retry++
 	}
 
+	adresp := &AdvanceResponse{}
+
 	startTime := time.Now()
 	for i := 0; i < setting.retry; i++ {
 		// solve Golang http post error : http: ContentLength=355 with Body length 0 bug
-		req, err := genHttpRequest(method, url, setting)
+		err := client.doOnce(method, url, setting, adresp)
 		if err != nil {
-			return nil, err
-		}
-
-		if setting.readWriteTimeout > 0 {
-			ctx, cancel = context.WithTimeout(req.Context(), setting.readWriteTimeout)
-			req = req.WithContext(ctx)
-		}
-
-		resp, err2 = client.client.Do(req)
-
-		if cancel != nil {
-			cancel()
-		}
-
-		if err2 != nil {
-			time.Sleep(setting.retryInterval)
-			setting.body = bytes.NewBuffer(setting.rawBody)
-			continue
-		}
-
-		// 非2xx 或 3xx的状态码也认为是服务端响应出错，需重试
-		if !(resp.StatusCode >= 200 && resp.StatusCode < 400) {
 			time.Sleep(setting.retryInterval)
 			setting.body = bytes.NewBuffer(setting.rawBody)
 			continue
@@ -265,42 +241,65 @@ func (client *AdvanceHttpClient) do(method, uri string, setting *AdvanceSettings
 		break
 	}
 
-	if err2 != nil {
-		return nil, err2
+	adresp.Time = int64(time.Now().Sub(startTime))
+
+	return adresp, nil
+}
+
+func (client *AdvanceHttpClient) doOnce(method, url string, setting *AdvanceSettings, adresp *AdvanceResponse) error {
+
+	req, err := genHttpRequest(method, url, setting)
+	if err != nil {
+		return err
+	}
+
+	if setting.readWriteTimeout > 0 {
+		ctx, cancel := context.WithTimeout(req.Context(), setting.readWriteTimeout)
+		defer cancel()
+		req = req.WithContext(ctx)
+	}
+
+	resp, err := client.client.Do(req)
+
+	if err != nil {
+		//time.Sleep(client.retryInterval)
+		//client.body = bytes.NewBuffer(client.rawBody)
+		return err
 	}
 
 	defer resp.Body.Close()
 
-	adresp := &AdvanceResponse{
-		Header:     resp.Header,
-		StatusCode: resp.StatusCode,
-		Status:     resp.Status,
+	// 非2xx 或 3xx的状态码也认为是服务端响应出错，需重试
+	if !(resp.StatusCode >= 200 && resp.StatusCode < 400) {
+		//time.Sleep(client.retryInterval)
+		//client.body = bytes.NewBuffer(client.rawBody)
+		return errors.New("status code error")
 	}
+
+	adresp.Header = resp.Header
+	adresp.StatusCode = resp.StatusCode
+	adresp.Status = resp.Status
 
 	if setting.gzip && resp.Header.Get("Content-Encoding") == "gzip" {
 		reader, err := gzip.NewReader(resp.Body)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		body, err := ioutil.ReadAll(reader)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		adresp.Body = body
-		adresp.Time = int64(time.Now().Sub(startTime))
-
-		return adresp, nil
+		return nil
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	adresp.Body = body
-	adresp.Time = int64(time.Now().Sub(startTime))
-
-	return adresp, nil
+	return nil
 }
