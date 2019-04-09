@@ -5,7 +5,6 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -242,6 +241,17 @@ func (client *AdvanceHttpClient) do(method, uri string, setting *AdvanceSettings
 			continue
 		}
 
+		// 非2xx 或 3xx的状态码也认为是服务端响应出错，需重试
+		if !(adresp.StatusCode >= 200 && adresp.StatusCode < 400) {
+			if i == setting.retry-1 {
+				break
+			}
+
+			time.Sleep(setting.retryInterval)
+			setting.body = bytes.NewBuffer(setting.rawBody)
+			continue
+		}
+
 		break
 	}
 
@@ -266,19 +276,10 @@ func (client *AdvanceHttpClient) doOnce(method, url string, setting *AdvanceSett
 	resp, err := client.client.Do(req)
 
 	if err != nil {
-		//time.Sleep(client.retryInterval)
-		//client.body = bytes.NewBuffer(client.rawBody)
 		return err
 	}
 
 	defer resp.Body.Close()
-
-	// 非2xx 或 3xx的状态码也认为是服务端响应出错，需重试
-	if !(resp.StatusCode >= 200 && resp.StatusCode < 400) {
-		//time.Sleep(client.retryInterval)
-		//client.body = bytes.NewBuffer(client.rawBody)
-		return errors.New("status code error")
-	}
 
 	adresp.Header = resp.Header
 	adresp.StatusCode = resp.StatusCode
