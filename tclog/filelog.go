@@ -354,8 +354,11 @@ func (fileLog *FileLog) doRotate(logTime time.Time, normal bool) error {
 }
 
 func (fileLog *FileLog) deleteOldLog() {
-	dir := filepath.Dir(fileLog.filepath)
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) (returnErr error) {
+	filepath.Walk(fileLog.filepath, func(path string, info os.FileInfo, err error) (returnErr error) {
+		if err != nil {
+			return
+		}
+
 		defer func() {
 			if r := recover(); r != nil {
 				fmt.Fprintf(os.Stderr, "Unable to delete old log '%s', error: %v\n", path, r)
