@@ -95,7 +95,7 @@ func NewTcLog(filepath, filename, level string) (*TcLog, error) {
 	hostname, _ := os.Hostname()
 	log.hostname = hostname
 
-	err = log.fileLog.startLogger()
+	err = log.fileLog.startLogger(true, true)
 	if err != nil {
 		return nil, err
 	}

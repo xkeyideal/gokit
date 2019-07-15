@@ -14,7 +14,7 @@ import (
 )
 
 type FileLog struct {
-	sync.Mutex
+	lock *sync.Mutex
 
 	maxLines               int
 	normalMaxLinesCurLines int
@@ -26,9 +26,10 @@ type FileLog struct {
 	errMaxSizeCurSize    int
 
 	// Rotate daily
-	daily         bool
-	maxDays       int64
-	dailyOpenDate int
+	daily               bool
+	maxDays             int64
+	dailyNormalOpenDate int
+	dailyErrOpenDate    int
 
 	rotate bool
 
@@ -90,14 +91,14 @@ func (fileLog *FileLog) reopenCheck() {
 		if !fileExist(normalLog) {
 			file, err := fileLog.openFile(normalLog)
 			if err == nil {
-				fileLog.Lock()
+				fileLog.lock.Lock()
 				if fileLog.file != nil {
 					fileLog.file.Close()
 				}
 				fileLog.file = file
 				fileLog.normalMaxSizeCurSize = 0
 				fileLog.normalMaxLinesCurLines = 0
-				fileLog.Unlock()
+				fileLog.lock.Unlock()
 			}
 		}
 
@@ -105,14 +106,14 @@ func (fileLog *FileLog) reopenCheck() {
 		if !fileExist(warnLog) {
 			errFile, err := fileLog.openFile(warnLog)
 			if err == nil {
-				fileLog.Lock()
+				fileLog.lock.Lock()
 				if fileLog.errFile != nil {
 					fileLog.errFile.Close()
 				}
 				fileLog.errFile = errFile
 				fileLog.errMaxSizeCurSize = 0
 				fileLog.errMaxLinesCurLines = 0
-				fileLog.Unlock()
+				fileLog.lock.Unlock()
 			}
 		}
 	}
@@ -121,6 +122,7 @@ func (fileLog *FileLog) reopenCheck() {
 
 func newFileLog() *FileLog {
 	return &FileLog{
+		lock:     &sync.Mutex{},
 		filename: "log_filename",
 		maxLines: FileDefMaxLines,
 		maxSize:  FileDefMaxSize,
@@ -141,67 +143,78 @@ func (fileLog *FileLog) openFile(filename string) (*os.File, error) {
 	return file, err
 }
 
-func (fileLog *FileLog) startLogger() error {
+func (fileLog *FileLog) startLogger(info, warn bool) error {
 
 	normalLog := fileLog.filepath + "/" + fileLog.filename + ".log"
-	file, err := fileLog.openFile(normalLog)
-	if err != nil {
-		return err
-	}
-	if fileLog.file != nil {
-		fileLog.file.Close()
-	}
-	fileLog.file = file
 
-	warnLog := normalLog + ".wf"
-	errFile, err := fileLog.openFile(warnLog)
-	if err != nil {
-		fileLog.file.Close()
-		fileLog.file = nil
-		return err
+	if info {
+		file, err := fileLog.openFile(normalLog)
+		if err != nil {
+			return err
+		}
+		if fileLog.file != nil {
+			fileLog.file.Close()
+		}
+		fileLog.file = file
 	}
-	if fileLog.errFile != nil {
-		fileLog.errFile.Close()
-	}
-	fileLog.errFile = errFile
 
-	return fileLog.initFd()
+	if warn {
+		warnLog := normalLog + ".wf"
+		errFile, err := fileLog.openFile(warnLog)
+		if err != nil {
+			fileLog.file.Close()
+			fileLog.file = nil
+			return err
+		}
+		if fileLog.errFile != nil {
+			fileLog.errFile.Close()
+		}
+		fileLog.errFile = errFile
+	}
+
+	return fileLog.initFd(info, warn)
 }
 
-func (fileLog *FileLog) initFd() error {
-	fileLog.dailyOpenDate = time.Now().Day()
+func (fileLog *FileLog) initFd(info, warn bool) error {
 
-	normalFd := fileLog.file
-	fInfo, err := normalFd.Stat()
-	if err != nil {
-		return NewError("get normalfile stat err:%v", err)
-	}
-	fileLog.normalMaxSizeCurSize = int(fInfo.Size())
-	fileLog.normalMaxLinesCurLines = 0
-	if fInfo.Size() > 0 {
-		normalLog := fileLog.filepath + "/" + fileLog.filename + ".log"
-		count, err := fileLog.lines(normalLog)
+	if info {
+		fileLog.dailyNormalOpenDate = time.Now().Day()
+		normalFd := fileLog.file
+		fInfo, err := normalFd.Stat()
 		if err != nil {
-			return err
+			return NewError("get normalfile stat err:%v", err)
 		}
-		fileLog.normalMaxLinesCurLines = count
+		fileLog.normalMaxSizeCurSize = int(fInfo.Size())
+		fileLog.normalMaxLinesCurLines = 0
+		if fInfo.Size() > 0 {
+			normalLog := fileLog.filepath + "/" + fileLog.filename + ".log"
+			count, err := fileLog.lines(normalLog)
+			if err != nil {
+				return err
+			}
+			fileLog.normalMaxLinesCurLines = count
+		}
 	}
 
-	errFd := fileLog.errFile
-	fInfo, err = errFd.Stat()
-	if err != nil {
-		return NewError("get errfile stat err:%v", err)
-	}
-	fileLog.errMaxSizeCurSize = int(fInfo.Size())
-	fileLog.errMaxLinesCurLines = 0
-	if fInfo.Size() > 0 {
-		errLog := fileLog.filepath + "/" + fileLog.filename + ".log.wf"
-		count, err := fileLog.lines(errLog)
+	if warn {
+		fileLog.dailyErrOpenDate = time.Now().Day()
+		errFd := fileLog.errFile
+		fInfo, err := errFd.Stat()
 		if err != nil {
-			return err
+			return NewError("get errfile stat err:%v", err)
 		}
-		fileLog.errMaxLinesCurLines = count
+		fileLog.errMaxSizeCurSize = int(fInfo.Size())
+		fileLog.errMaxLinesCurLines = 0
+		if fInfo.Size() > 0 {
+			errLog := fileLog.filepath + "/" + fileLog.filename + ".log.wf"
+			count, err := fileLog.lines(errLog)
+			if err != nil {
+				return err
+			}
+			fileLog.errMaxLinesCurLines = count
+		}
 	}
+
 	return nil
 }
 
@@ -241,9 +254,18 @@ func (fileLog *FileLog) needRotate(size int, day int, normal bool) bool {
 		curSize = fileLog.errMaxSizeCurSize
 	}
 
-	return (fileLog.maxLines > 0 && curLines >= fileLog.maxLines) ||
-		(fileLog.maxSize > 0 && curSize >= fileLog.maxSize) ||
-		(fileLog.daily && day != fileLog.dailyOpenDate)
+	ok := false
+	if normal {
+		ok = (fileLog.maxLines > 0 && curLines >= fileLog.maxLines) ||
+			(fileLog.maxSize > 0 && curSize >= fileLog.maxSize) ||
+			(fileLog.daily && day != fileLog.dailyNormalOpenDate)
+	} else {
+		ok = (fileLog.maxLines > 0 && curLines >= fileLog.maxLines) ||
+			(fileLog.maxSize > 0 && curSize >= fileLog.maxSize) ||
+			(fileLog.daily && day != fileLog.dailyErrOpenDate)
+	}
+
+	return ok
 }
 
 func (fileLog *FileLog) WriteMsg(hostname string, when time.Time, msg string, level int) error {
@@ -255,24 +277,26 @@ func (fileLog *FileLog) WriteMsg(hostname string, when time.Time, msg string, le
 
 	var err error
 	if fileLog.rotate {
-		fileLog.Lock()
 		if level >= LevelWarn {
+			fileLog.lock.Lock()
 			if fileLog.needRotate(msgLength, d, false) {
 				if err = fileLog.doRotate(when, false); err != nil {
 					fmt.Fprintf(os.Stderr, "FileLogErrWriter(%q): %s\n", fileLog.filename, err)
 				}
 			}
+			fileLog.lock.Unlock()
 		} else {
+			fileLog.lock.Lock()
 			if fileLog.needRotate(msgLength, d, true) {
 				if err = fileLog.doRotate(when, true); err != nil {
 					fmt.Fprintf(os.Stderr, "FileLogWriter(%q): %s\n", fileLog.filename, err)
 				}
 			}
+			fileLog.lock.Unlock()
 		}
-		fileLog.Unlock()
 	}
 
-	fileLog.Lock()
+	fileLog.lock.Lock()
 	if level >= LevelWarn {
 		_, err = fileLog.errFile.Write([]byte(msg))
 		if err == nil {
@@ -286,7 +310,7 @@ func (fileLog *FileLog) WriteMsg(hostname string, when time.Time, msg string, le
 			fileLog.normalMaxSizeCurSize += msgLength
 		}
 	}
-	fileLog.Unlock()
+	fileLog.lock.Unlock()
 	return err
 }
 
@@ -338,8 +362,16 @@ func (fileLog *FileLog) doRotate(logTime time.Time, normal bool) error {
 	// Rename the file to its new found name
 	// even if occurs error,we MUST guarantee to  restart new logger
 	renameErr := os.Rename(filepath, fName)
+
+	info, warn := false, false
+	if normal {
+		info = true
+	} else {
+		warn = true
+	}
+
 	// re-start logger
-	startLoggerErr := fileLog.startLogger()
+	startLoggerErr := fileLog.startLogger(info, warn)
 
 	go fileLog.deleteOldLog()
 
@@ -448,33 +480,3 @@ func formatTimeHeader(when time.Time) ([]byte, int) {
 
 	return buf[0:], d
 }
-
-//func formatTimeHeader(when time.Time) ([]byte, int) {
-//	y, mo, d := when.Date()
-//	h, mi, s := when.Clock()
-//	//len("2006/01/02 15:04:05 ")==20
-//	var buf [20]byte
-
-//	buf[0] = y1[y/1000%10]
-//	buf[1] = y2[y/100]
-//	buf[2] = y3[y-y/100*100]
-//	buf[3] = y4[y-y/100*100]
-//	buf[4] = '/'
-//	buf[5] = mo1[mo-1]
-//	buf[6] = mo2[mo-1]
-//	buf[7] = '/'
-//	buf[8] = d1[d-1]
-//	buf[9] = d2[d-1]
-//	buf[10] = ' '
-//	buf[11] = h1[h]
-//	buf[12] = h2[h]
-//	buf[13] = ':'
-//	buf[14] = mi1[mi]
-//	buf[15] = mi2[mi]
-//	buf[16] = ':'
-//	buf[17] = s1[s]
-//	buf[18] = s2[s]
-//	buf[19] = ' '
-
-//	return buf[0:], d
-//}
