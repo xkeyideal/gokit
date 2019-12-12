@@ -16,53 +16,51 @@ type MongoFactory struct {
 	session *mgo.Session
 }
 
-func NewMongoFactoryWithDsn(dsn string, connTimeoutMs, maxOpenConn int) (factory *MongoFactory, err error) {
+func NewMongoFactoryWithDsn(dsn string, connTimeoutMs, maxOpenConn int) (*MongoFactory, error) {
 	if connTimeoutMs <= 0 {
 		connTimeoutMs = DefConnectionTimeout
 	}
 
 	session, err := mgo.DialWithTimeout(dsn, time.Duration(connTimeoutMs)*time.Millisecond)
 	if err != nil {
-		return
+		return nil, err
 	}
+
 	session.SetMode(mgo.PrimaryPreferred, true)
 	session.SetPoolLimit(maxOpenConn)
 	session.SetSyncTimeout(DefReadTimeout * time.Millisecond)
 
-	factory = &MongoFactory{session: session}
-	return
+	return &MongoFactory{session: session}, nil
 }
 
-func NewMongoFactorySecondaryWithDsn(dsn string, connTimeoutMs, maxOpenConn int) (factory *MongoFactory, err error) {
-
+func NewMongoFactorySecondaryWithDsn(dsn string, connTimeoutMs, maxOpenConn int) (*MongoFactory, error) {
 	session, err := mgo.DialWithTimeout(dsn, time.Duration(connTimeoutMs)*time.Millisecond)
 	if err != nil {
-		return
+		return nil, err
 	}
+
 	session.SetMode(mgo.SecondaryPreferred, true)
 	session.SetPoolLimit(maxOpenConn)
 	session.SetSyncTimeout(DefReadTimeout * time.Millisecond)
 
-	factory = &MongoFactory{session: session}
-	return
+	return &MongoFactory{session: session}, nil
 }
 
-func NewMongoFactoryDirectWithDsn(dsn string, connTimeoutMs, maxOpenConn int) (factory *MongoFactory, err error) {
-
+func NewMongoFactoryDirectWithDsn(dsn string, connTimeoutMs, maxOpenConn int) (*MongoFactory, error) {
 	session, err := mgo.DialWithTimeout(dsn, time.Duration(connTimeoutMs)*time.Millisecond)
 	if err != nil {
-		return
+		return nil, err
 	}
+
 	session.SetMode(mgo.Nearest, true)
 	session.SetPoolLimit(maxOpenConn)
 	session.SetSyncTimeout(DefReadTimeout * time.Millisecond)
 
-	factory = &MongoFactory{session: session}
-	return
+	return &MongoFactory{session: session}, nil
 }
 
 func NewMongoFactoryWithParam(username, passwd, host string, port int,
-	database string, connTimeoutMs, maxOpenConn int) (factory *MongoFactory, err error) {
+	database string, connTimeoutMs, maxOpenConn int) (*MongoFactory, error) {
 
 	if connTimeoutMs <= 0 {
 		connTimeoutMs = DefConnectionTimeout
@@ -73,32 +71,27 @@ func NewMongoFactoryWithParam(username, passwd, host string, port int,
 
 	session, err := mgo.DialWithTimeout(dsn, time.Duration(connTimeoutMs)*time.Millisecond)
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	session.SetMode(mgo.PrimaryPreferred, true)
 	session.SetPoolLimit(maxOpenConn)
-	factory.session.SetSyncTimeout(DefReadTimeout * time.Millisecond)
+	session.SetSyncTimeout(DefReadTimeout * time.Millisecond)
 
-	factory = &MongoFactory{session: session}
-	return
+	return &MongoFactory{session: session}, nil
 }
 
 func (factory *MongoFactory) CreateIndex(dbName, collName string, index mgo.Index) error {
-	session, err := factory.Get()
-	if err != nil {
-		return err
-	}
+	session := factory.Get()
 	defer factory.Put(session)
 
 	coll := session.DB(dbName).C(collName)
-	coll.EnsureIndex(index)
-	return nil
+
+	return coll.EnsureIndex(index)
 }
 
-func (factory *MongoFactory) Get() (session *mgo.Session, err error) {
-	session = factory.session.Copy()
-	return
+func (factory *MongoFactory) Get() *mgo.Session {
+	return factory.session.Copy()
 }
 
 func (factory *MongoFactory) Put(session *mgo.Session) {
