@@ -3,8 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"gatewaycenter/tools"
-	"hotel-price-client/config"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -24,7 +22,7 @@ func main() {
 	router.POST("/test", func(c *gin.Context) {
 		bytes, err := ioutil.ReadAll(c.Request.Body)
 		if err != nil {
-			SetStrResp(http.StatusBadRequest, tools.HTTP_BODY_ERR, err.Error(), "", c)
+			SetStrResp(http.StatusBadRequest, HTTP_BODY_ERR, err.Error(), "", c)
 			return
 		}
 
@@ -41,8 +39,6 @@ func main() {
 		Addr:    fmt.Sprintf("0.0.0.0:12745"),
 		Handler: router,
 	}
-
-	fmt.Printf("hotel-price-client runing %s port %s \n", config.SystemCfg.RunEnv, config.SystemCfg.Port)
 
 	if err := server.ListenAndServe(); err != nil {
 		fmt.Println("listenAndServe error ", err.Error())
