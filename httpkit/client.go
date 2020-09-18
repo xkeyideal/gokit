@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -184,8 +185,14 @@ func (client *HttpClient) genHttpRequest(method, targetUrl string) (*http.Reques
 	}
 
 	for key, values := range client.headers {
-		for _, value := range values {
-			req.Header.Add(key, value)
+		if strings.ToLower(key) == "host" {
+			if len(values) > 0 {
+				req.Host = values[0]
+			}
+		} else {
+			for _, value := range values {
+				req.Header.Add(key, value)
+			}
 		}
 	}
 
