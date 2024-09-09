@@ -2,7 +2,7 @@ package main
 
 import (
 	"github.com/xkeyideal/gokit/xetcd/mutex"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 func main() {

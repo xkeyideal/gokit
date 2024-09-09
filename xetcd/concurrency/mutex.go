@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"sync"
 
-	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
-	v3 "go.etcd.io/etcd/clientv3"
+	pb "go.etcd.io/etcd/api/v3/etcdserverpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // Mutex implements the sync Locker interface with etcd
@@ -46,15 +46,15 @@ func (m *Mutex) Lock(ctx context.Context) error {
 	m.myKey = fmt.Sprintf("%s%x", m.pfx, s.Lease())
 
 	// 比较key的createRevision
-	cmp := v3.Compare(v3.CreateRevision(m.myKey), "=", 0)
+	cmp := clientv3.Compare(clientv3.CreateRevision(m.myKey), "=", 0)
 	// put self in lock waiters via myKey; oldest waiter holds lock
-	put := v3.OpPut(m.myKey, "", v3.WithLease(s.Lease()))
+	put := clientv3.OpPut(m.myKey, "", clientv3.WithLease(s.Lease()))
 	// reuse key in case this session already holds the lock
-	get := v3.OpGet(m.myKey)
+	get := clientv3.OpGet(m.myKey)
 	// fetch current holder to complete uncontended path with only one RPC
 	// gets the key with the oldest creation revision
 	// 通过前缀，获取该前缀下所有的keys，并且按照create_revision从小到大排序，方便后续取第一个用于抢锁成功的判断
-	getOwner := v3.OpGet(m.pfx, v3.WithFirstCreate()...)
+	getOwner := clientv3.OpGet(m.pfx, clientv3.WithFirstCreate()...)
 	resp, err := client.Txn(ctx).If(cmp).Then(put, getOwner).Else(get, getOwner).Commit()
 	if err != nil {
 		return err
@@ -99,8 +99,8 @@ func (m *Mutex) Unlock(ctx context.Context) error {
 	return nil
 }
 
-func (m *Mutex) IsOwner() v3.Cmp {
-	return v3.Compare(v3.CreateRevision(m.myKey), "=", m.myRev)
+func (m *Mutex) IsOwner() clientv3.Cmp {
+	return clientv3.Compare(clientv3.CreateRevision(m.myKey), "=", m.myRev)
 }
 
 func (m *Mutex) Key() string { return m.myKey }

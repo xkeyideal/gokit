@@ -5,7 +5,7 @@ import (
 
 	"github.com/xkeyideal/gokit/xetcd/concurrency"
 
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 type EtcdMutex struct {
@@ -52,7 +52,7 @@ func NewEtcdLeaseMutex(key string, client *clientv3.Client, ttl int64) (*EtcdMut
 	}, nil
 }
 
-//Lock get lock
+// Lock get lock
 func (em *EtcdMutex) Lock() error {
 	return em.mutex.Lock(em.ctx)
 }

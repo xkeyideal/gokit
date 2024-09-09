@@ -8,7 +8,7 @@ import (
 	"syscall"
 
 	"github.com/xkeyideal/gokit/xetcd/election"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 func main() {
