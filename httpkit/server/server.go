@@ -1,9 +1,9 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
 
@@ -22,17 +22,14 @@ func main() {
 	router.POST("/test", func(c *gin.Context) {
 		bytes, err := ioutil.ReadAll(c.Request.Body)
 		if err != nil {
+			panic("sdfsdf" + err.Error())
 			SetStrResp(http.StatusBadRequest, HTTP_BODY_ERR, err.Error(), "", c)
 			return
 		}
 
-		data := TestData{}
-		json.Unmarshal(bytes, &data)
-		fmt.Println(data)
+		log.Println("121221", string(bytes))
 
-		SetStrResp(500, 0, "OK", "123", c)
-
-		return
+		SetStrResp(400, 0, "OK", "123", c)
 	})
 
 	server = &http.Server{
@@ -63,7 +60,6 @@ var errCodeMsg = map[int]string{
 }
 
 func SetStrResp(httpCode, code int, msg string, result interface{}, c *gin.Context) {
-
 	m := msg
 
 	if v, ok := errCodeMsg[code]; ok {

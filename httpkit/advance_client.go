@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/moul/http2curl"
 )
 
 type AdvanceHttpClient struct {
@@ -52,19 +54,20 @@ func NewAdvanceHttpClient(scheme, host string, connTimeout time.Duration, tlsCfg
 }
 
 type AdvanceSettings struct {
-	readWriteTimeout time.Duration
-	path             string
-	params           url.Values
-	headers          http.Header
-	cookie           *http.Cookie
-	body             io.Reader
-	rawBody          []byte
-	baseAuth         bool
-	baseAuthUsername string
-	baseAuthPassword string
-	gzip             bool
-	retry            int
-	retryInterval    time.Duration
+	readWriteTimeout  time.Duration
+	path              string
+	params            url.Values
+	headers           http.Header
+	cookie            *http.Cookie
+	body              io.Reader
+	rawBody           []byte
+	baseAuth          bool
+	baseAuthUsername  string
+	baseAuthPassword  string
+	gzip              bool
+	retry             int
+	retryInterval     time.Duration
+	retryHttpStatuses []int // 重试的http状态码
 }
 
 type AdvanceResponse struct {
@@ -75,15 +78,16 @@ type AdvanceResponse struct {
 	Time       int64
 }
 
-func NewAdvanceSettings(rwTimeout time.Duration, retry int, retryInterval time.Duration) *AdvanceSettings {
+func NewAdvanceSettings(rwTimeout time.Duration, retry int, retryInterval time.Duration, retryHttpStatuses ...int) *AdvanceSettings {
 	return &AdvanceSettings{
-		readWriteTimeout: rwTimeout,
-		params:           url.Values{},
-		headers:          http.Header{},
-		baseAuth:         false,
-		gzip:             false,
-		retry:            retry,
-		retryInterval:    retryInterval,
+		readWriteTimeout:  rwTimeout,
+		params:            url.Values{},
+		headers:           http.Header{},
+		baseAuth:          false,
+		gzip:              false,
+		retry:             retry,
+		retryInterval:     retryInterval,
+		retryHttpStatuses: retryHttpStatuses,
 	}
 }
 
@@ -118,6 +122,11 @@ func (setting *AdvanceSettings) SetParams(kvs map[string]string) *AdvanceSetting
 		setting.params.Set(key, value)
 	}
 
+	return setting
+}
+
+func (setting *AdvanceSettings) SetRetryHttpStatuses(retryHttpStatuses []int) *AdvanceSettings {
+	setting.retryHttpStatuses = retryHttpStatuses
 	return setting
 }
 
@@ -158,6 +167,16 @@ func (setting *AdvanceSettings) SetBasicAuth(username, password string) *Advance
 	return setting
 }
 
+func (setting *AdvanceSettings) retryCheck(responseStatusCode int) bool {
+	for _, code := range setting.retryHttpStatuses {
+		if code == responseStatusCode {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (client *AdvanceHttpClient) Get(uri string, setting *AdvanceSettings) (*AdvanceResponse, error) {
 	setting.body = nil
 	setting.rawBody = []byte{}
@@ -184,7 +203,33 @@ func (client *AdvanceHttpClient) Do(method, targetUrl string, setting *AdvanceSe
 	return client.do(method, targetUrl, setting)
 }
 
+func (client *AdvanceHttpClient) ToCurlCommand(method, targetUrl string, setting *AdvanceSettings) (string, error) {
+	req, err := genHttpRequest(method, targetUrl, setting)
+	if err != nil {
+		return "", err
+	}
+
+	cmd, err := http2curl.GetCurlCommand(req)
+	if err != nil {
+		return "", err
+	}
+
+	return cmd.String(), nil
+}
+
 func genHttpRequest(method, url string, setting *AdvanceSettings) (*http.Request, error) {
+	for _, code := range setting.retryHttpStatuses {
+		if code <= 201 {
+			return nil, fmt.Errorf("设置的重试http状态码包含201及以下, %+v", setting.retryHttpStatuses)
+		}
+
+		if code >= 500 {
+			return nil, fmt.Errorf("设置的重试http状态码包含500及以上服务端错误的状态码, %+v", setting.retryHttpStatuses)
+		}
+	}
+
+	setting.body = bytes.NewBuffer(setting.rawBody)
+
 	req, err := http.NewRequest(method, url, setting.body)
 	if err != nil {
 		return nil, err
@@ -237,18 +282,15 @@ func (client *AdvanceHttpClient) do(method, uri string, setting *AdvanceSettings
 				return nil, err
 			}
 			time.Sleep(setting.retryInterval)
-			setting.body = bytes.NewBuffer(setting.rawBody)
 			continue
 		}
 
-		// 非2xx 或 3xx的状态码也认为是服务端响应出错，需重试
-		if !(adresp.StatusCode >= 200 && adresp.StatusCode < 400) {
+		if setting.retryCheck(adresp.StatusCode) {
 			if i == setting.retry-1 {
 				break
 			}
 
 			time.Sleep(setting.retryInterval)
-			setting.body = bytes.NewBuffer(setting.rawBody)
 			continue
 		}
 
@@ -261,7 +303,6 @@ func (client *AdvanceHttpClient) do(method, uri string, setting *AdvanceSettings
 }
 
 func (client *AdvanceHttpClient) doOnce(method, url string, setting *AdvanceSettings, adresp *AdvanceResponse) error {
-
 	req, err := genHttpRequest(method, url, setting)
 	if err != nil {
 		return err

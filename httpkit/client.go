@@ -13,29 +13,34 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/moul/http2curl"
 )
 
 type HttpClient struct {
-	c                *http.Client
-	rwTimeout        time.Duration
-	params           url.Values
-	headers          http.Header
-	cookie           *http.Cookie
-	body             io.Reader
-	rawBody          []byte //原始body备份使用，retry的时候使用
-	baseAuth         bool
-	baseAuthUsername string
-	baseAuthPassword string
-	gzip             bool
-	retry            int
-	retryInterval    time.Duration
+	c                 *http.Client
+	rwTimeout         time.Duration
+	params            url.Values
+	headers           http.Header
+	cookie            *http.Cookie
+	body              io.Reader
+	rawBody           []byte //原始body备份使用，retry的时候使用
+	baseAuth          bool
+	baseAuthUsername  string
+	baseAuthPassword  string
+	gzip              bool
+	retry             int
+	retryInterval     time.Duration
+	retryHttpStatuses []int // 重试的http状态码
 
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
 func NewHttpClient(rwTimeout time.Duration, retry int,
-	retryInterval, connTimeout time.Duration, tlsCfg *tls.Config) *HttpClient {
+	retryInterval, connTimeout time.Duration, tlsCfg *tls.Config,
+	retryHttpStatuses ...int,
+) *HttpClient {
 	tr := &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   connTimeout,
@@ -59,14 +64,15 @@ func NewHttpClient(rwTimeout time.Duration, retry int,
 	}
 
 	return &HttpClient{
-		c:             client,
-		params:        url.Values{},
-		headers:       http.Header{},
-		rwTimeout:     rwTimeout,
-		baseAuth:      false,
-		gzip:          false,
-		retry:         retry,
-		retryInterval: retryInterval,
+		c:                 client,
+		params:            url.Values{},
+		headers:           http.Header{},
+		rwTimeout:         rwTimeout,
+		baseAuth:          false,
+		gzip:              false,
+		retry:             retry,
+		retryInterval:     retryInterval,
+		retryHttpStatuses: retryHttpStatuses,
 	}
 }
 
@@ -96,6 +102,11 @@ func (client *HttpClient) SetParams(kvs map[string]string) *HttpClient {
 		client.params.Set(key, value)
 	}
 
+	return client
+}
+
+func (client *HttpClient) SetRetryHttpStatuses(retryHttpStatuses []int) *HttpClient {
+	client.retryHttpStatuses = retryHttpStatuses
 	return client
 }
 
@@ -168,6 +179,16 @@ func (client *HttpClient) Do(method, targetUrl string) (*AdvanceResponse, error)
 }
 
 func (client *HttpClient) genHttpRequest(method, targetUrl string) (*http.Request, error) {
+	for _, code := range client.retryHttpStatuses {
+		if code <= 201 {
+			return nil, fmt.Errorf("设置的重试http状态码包含201及以下, %+v", client.retryHttpStatuses)
+		}
+
+		if code >= 500 {
+			return nil, fmt.Errorf("设置的重试http状态码包含500及以上服务端错误的状态码, %+v", client.retryHttpStatuses)
+		}
+	}
+
 	u, err := url.Parse(targetUrl)
 	if err != nil {
 		return nil, err
@@ -178,6 +199,7 @@ func (client *HttpClient) genHttpRequest(method, targetUrl string) (*http.Reques
 	}
 
 	u.RawQuery = client.params.Encode()
+	client.body = bytes.NewBuffer(client.rawBody)
 
 	req, err := http.NewRequest(method, u.String(), client.body)
 	if err != nil {
@@ -207,8 +229,21 @@ func (client *HttpClient) genHttpRequest(method, targetUrl string) (*http.Reques
 	return req, nil
 }
 
-func (client *HttpClient) do(method, targetUrl string) (*AdvanceResponse, error) {
+func (client *HttpClient) ToCurlCommand(method, targetUrl string) (string, error) {
+	req, err := client.genHttpRequest(method, targetUrl)
+	if err != nil {
+		return "", err
+	}
 
+	cmd, err := http2curl.GetCurlCommand(req)
+	if err != nil {
+		return "", err
+	}
+
+	return cmd.String(), nil
+}
+
+func (client *HttpClient) do(method, targetUrl string) (*AdvanceResponse, error) {
 	if client.retry <= 0 {
 		client.retry = 1
 	} else {
@@ -226,18 +261,15 @@ func (client *HttpClient) do(method, targetUrl string) (*AdvanceResponse, error)
 				return nil, err
 			}
 			time.Sleep(client.retryInterval)
-			client.body = bytes.NewBuffer(client.rawBody)
 			continue
 		}
 
-		// 非2xx 或 3xx的状态码也认为是服务端响应出错，需重试
-		if !(adresp.StatusCode >= 200 && adresp.StatusCode < 400) {
+		if client.retryCheck(adresp.StatusCode) {
 			if i == client.retry-1 {
 				break
 			}
 
 			time.Sleep(client.retryInterval)
-			client.body = bytes.NewBuffer(client.rawBody)
 			continue
 		}
 
@@ -249,8 +281,17 @@ func (client *HttpClient) do(method, targetUrl string) (*AdvanceResponse, error)
 	return adresp, nil
 }
 
-func (client *HttpClient) doOnce(method, targetUrl string, adresp *AdvanceResponse) error {
+func (client *HttpClient) retryCheck(responseStatusCode int) bool {
+	for _, code := range client.retryHttpStatuses {
+		if code == responseStatusCode {
+			return true
+		}
+	}
 
+	return false
+}
+
+func (client *HttpClient) doOnce(method, targetUrl string, adresp *AdvanceResponse) error {
 	req, err := client.genHttpRequest(method, targetUrl)
 	if err != nil {
 		return err
