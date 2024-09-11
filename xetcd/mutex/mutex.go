@@ -3,7 +3,7 @@ package mutex
 import (
 	"context"
 
-	"github.com/xkeyideal/gokit/xetcd/concurrency"
+	"go.etcd.io/etcd/client/v3/concurrency"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 )

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xkeyideal/gokit/xetcd/concurrency"
+	"go.etcd.io/etcd/client/v3/concurrency"
 
 	"github.com/pkg/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -14,42 +14,48 @@ import (
 
 var (
 	reconnectBackOff = time.Second * 2
-	session          *concurrency.Session
-	election         *concurrency.Election
 )
 
 type ElectLeader struct {
 	ttl int
 
+	// 初次启动, 查询etcd自己是Leader后，是否依然重新选举, 默认是false(不重新选举)
+	recampaign bool
+
 	isLeader bool
 	leaderCh chan bool
+
+	session  *concurrency.Session
+	election *concurrency.Election
 
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 }
 
-func NewElectLeader(ttl int) *ElectLeader {
+func NewElectLeader(ttl int, recampaign bool) *ElectLeader {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ElectLeader{
-		ttl:      ttl,
-		isLeader: false,
-		leaderCh: make(chan bool, 10),
-		ctx:      ctx,
-		cancel:   cancel,
+		ttl:        ttl,
+		recampaign: recampaign,
+		isLeader:   false,
+		leaderCh:   make(chan bool, 10),
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 }
 
 func (el *ElectLeader) ElectLeader(client *clientv3.Client, host, electKey string) error {
-	if err := el.newSession(client, 0, electKey); err != nil {
-		log.Printf("while creating new session: %s", err)
+	err := el.newSession(client, 0, electKey)
+	if err != nil {
 		return err
 	}
 
 	go el.electLoop(client, host, electKey)
 
+	// before election check if had a leader
 	for {
-		resp, err := election.Leader(el.ctx)
+		resp, err := el.election.Leader(el.ctx)
 		if err != nil {
 			if err != concurrency.ErrElectionNoLeader {
 				return err
@@ -58,9 +64,15 @@ func (el *ElectLeader) ElectLeader(client *clientv3.Client, host, electKey strin
 			continue
 		}
 
+		// check if the leader is itself
 		if string(resp.Kvs[0].Value) != host {
 			el.leaderCh <- false
+		} else {
+			if !el.recampaign {
+				el.leaderCh <- true
+			}
 		}
+
 		break
 	}
 
@@ -81,27 +93,29 @@ func (el *ElectLeader) electLoop(client *clientv3.Client, host, electKey string)
 
 	for {
 		// 在尝试推选自己为leader之前，先查询etcd里是否有leader
-		if node, err = election.Leader(el.ctx); err != nil {
+		if node, err = el.election.Leader(el.ctx); err != nil {
 			// Leader() 正常的错误值是NoLeader
 			if err != concurrency.ErrElectionNoLeader {
-				log.Fatalf("while determining election leader: %s", err)
 				goto reconnect
 			}
 		} else {
-			log.Printf("query, key:%s, leader: %s, candidate: %s", string(node.Kvs[0].Key), string(node.Kvs[0].Value), host)
+			log.Printf("query, key:%s, leader: %s, candidate: %s\n", string(node.Kvs[0].Key), string(node.Kvs[0].Value), host)
 
 			// 当前etcd里显示自己是leader
 			if string(node.Kvs[0].Value) == host {
 				// 如果需要根据现有的值恢复leader
-				if true {
-					session.Close() // 先释放之前的session
+				if !el.recampaign {
+					el.session.Close() // 先释放之前的session
+
 					// 依据session里old lease，重建自己为主的session
 					if err = el.newSession(client, node.Kvs[0].Lease, electKey); err != nil {
-						log.Fatalf("while re-establishing session with lease: %s", err)
+						log.Printf("while re-establishing session with lease: %s\n", err)
 						goto reconnect
 					}
-					election = concurrency.ResumeElection(session, electKey,
-						string(node.Kvs[0].Key), node.Kvs[0].CreateRevision)
+					el.election = concurrency.ResumeElection(
+						el.session, electKey,
+						string(node.Kvs[0].Key), node.Kvs[0].CreateRevision,
+					)
 
 					// Because Campaign() only returns if the election entry doesn't exist
 					// we must skip the campaign call and go directly to observe when resuming
@@ -110,14 +124,17 @@ func (el *ElectLeader) electLoop(client *clientv3.Client, host, electKey string)
 					// If resign takes longer than our TTL then lease is expired and we are no
 					// longer leader anyway.
 					// 无需恢复leader，则释放当前自己为leader
+					el.election = concurrency.ResumeElection(
+						el.session, electKey,
+						string(node.Kvs[0].Key), node.Kvs[0].CreateRevision,
+					)
+
 					ctx, cancel := context.WithTimeout(context.Background(), time.Duration(el.ttl)*time.Second)
-					election := concurrency.ResumeElection(session, electKey,
-						string(node.Kvs[0].Key), node.Kvs[0].CreateRevision)
-					err = election.Resign(ctx)
+					err = el.election.Resign(ctx)
 					cancel()
 
 					if err != nil {
-						log.Fatalf("while resigning leadership after reconnect: %s", err)
+						log.Printf("while resigning leadership after reconnect: %s\n", err)
 						goto reconnect
 					}
 				}
@@ -131,7 +148,7 @@ func (el *ElectLeader) electLoop(client *clientv3.Client, host, electKey string)
 		errCh = make(chan error)
 		go func() {
 			// Make this a non blocking call so we can check for session close
-			errCh <- election.Campaign(el.ctx, host)
+			errCh <- el.election.Campaign(el.ctx, host)
 		}()
 
 		select {
@@ -141,14 +158,14 @@ func (el *ElectLeader) electLoop(client *clientv3.Client, host, electKey string)
 					return err
 				}
 				// NOTE: Campaign currently does not return an error if session expires
-				log.Fatalf("while campaigning for leader: %s", err)
-				session.Close()
+				log.Printf("while campaigning for leader: %s\n", err)
+				el.session.Close()
 				goto reconnect
 			}
 		case <-el.ctx.Done():
-			session.Close()
+			el.session.Close()
 			return err
-		case <-session.Done():
+		case <-el.session.Done():
 			goto reconnect
 		}
 
@@ -156,15 +173,15 @@ func (el *ElectLeader) electLoop(client *clientv3.Client, host, electKey string)
 		// If Campaign() returned without error, we are leader
 		el.setLeader(true)
 		// 观测选主的变化
-		observe = election.Observe(el.ctx)
+		observe = el.election.Observe(el.ctx)
 		for {
 			select {
 			case resp, ok := <-observe:
-				log.Printf("observe, key:%s, leader: %s, candidate: %s", string(resp.Kvs[0].Key), string(resp.Kvs[0].Value), host)
+				log.Printf("observe, key:%s, leader: %s, candidate: %s\n", string(resp.Kvs[0].Key), string(resp.Kvs[0].Value), host)
 				if !ok {
 					// NOTE: Observe will not close if the session expires, we must
 					// watch for session.Done()
-					session.Close()
+					el.session.Close()
 					goto reconnect
 				}
 				if string(resp.Kvs[0].Value) == host {
@@ -179,15 +196,15 @@ func (el *ElectLeader) electLoop(client *clientv3.Client, host, electKey string)
 					// If resign takes longer than our TTL then lease is expired and we are no
 					// longer leader anyway.
 					ctx, cancel := context.WithTimeout(context.Background(), time.Duration(el.ttl)*time.Second)
-					if err = election.Resign(ctx); err != nil {
-						log.Printf("while resigning leadership during shutdown: %s", err)
+					if err = el.election.Resign(ctx); err != nil {
+						log.Printf("while resigning leadership during shutdown: %s\n", err)
 					}
 					cancel()
 				}
 
-				session.Close()
+				el.session.Close()
 				return nil
-			case <-session.Done():
+			case <-el.session.Done():
 				goto reconnect
 			}
 		}
@@ -196,10 +213,10 @@ func (el *ElectLeader) electLoop(client *clientv3.Client, host, electKey string)
 		el.setLeader(false)
 		for {
 			recnt = 0
-			session.Close() // 重连之前先释放之前的session
+			el.session.Close() // 重连之前先释放之前的session
 			if err = el.newSession(client, 0, electKey); err != nil {
 				recnt++
-				log.Printf("while creating new session: %s", err)
+				log.Printf("while creating new session: %s\n", err)
 				if errors.Cause(err) == context.Canceled {
 					return err
 				}
@@ -222,8 +239,7 @@ func (el *ElectLeader) electLoop(client *clientv3.Client, host, electKey string)
 }
 
 func (el *ElectLeader) newSession(client *clientv3.Client, id int64, electKey string) error {
-	var err error
-	session, err = concurrency.NewSession(
+	session, err := concurrency.NewSession(
 		client,
 		concurrency.WithLease(clientv3.LeaseID(id)),
 		concurrency.WithTTL(el.ttl),
@@ -233,7 +249,8 @@ func (el *ElectLeader) newSession(client *clientv3.Client, id int64, electKey st
 		return err
 	}
 
-	election = concurrency.NewElection(session, electKey)
+	el.session = session
+	el.election = concurrency.NewElection(session, electKey)
 
 	return nil
 }
@@ -248,8 +265,7 @@ func (el *ElectLeader) setLeader(leader bool) {
 }
 
 func (el *ElectLeader) Leader() (string, error) {
-	resp, err := election.Leader(context.Background())
-
+	resp, err := el.election.Leader(context.Background())
 	if err != nil {
 		return "", err
 	}

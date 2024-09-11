@@ -31,7 +31,7 @@ func main() {
 
 	electKey := "/my-election"
 
-	el := election.NewElectLeader(15)
+	el := election.NewElectLeader(15, false)
 	err = el.ElectLeader(etcdClient, host, electKey)
 	if err != nil {
 		panic(err)
