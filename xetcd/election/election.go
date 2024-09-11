@@ -22,6 +22,7 @@ type ElectLeader struct {
 	// 初次启动, 查询etcd自己是Leader后，是否依然重新选举, 默认是false(不重新选举)
 	recampaign bool
 
+	electKey string // 参与选举的key
 	isLeader bool
 	leaderCh chan bool
 
@@ -33,59 +34,64 @@ type ElectLeader struct {
 	wg     sync.WaitGroup
 }
 
-func NewElectLeader(ttl int, recampaign bool) *ElectLeader {
+func NewElectLeader(ttl int, recampaign bool, electKey string) *ElectLeader {
 	ctx, cancel := context.WithCancel(context.Background())
+
 	return &ElectLeader{
 		ttl:        ttl,
 		recampaign: recampaign,
 		isLeader:   false,
-		leaderCh:   make(chan bool, 10),
+		leaderCh:   make(chan bool, 1),
 		ctx:        ctx,
 		cancel:     cancel,
 	}
 }
 
-func (el *ElectLeader) ElectLeader(client *clientv3.Client, host, electKey string) error {
-	err := el.newSession(client, 0, electKey)
+func (el *ElectLeader) ElectLeader(client *clientv3.Client, host string) error {
+	err := el.newSession(client, 0, el.electKey)
 	if err != nil {
 		return err
 	}
 
-	go el.electLoop(client, host, electKey)
+	go el.electLoop(client, host)
 
+	// 只有el.recampaign == true的时候, 才检测当前的主，否则等待electLoop的选举
 	// before election check if had a leader
-	for {
-		resp, err := el.election.Leader(el.ctx)
-		if err != nil {
-			if err != concurrency.ErrElectionNoLeader {
-				return err
+	if el.recampaign {
+		for {
+			resp, err := el.election.Leader(el.ctx)
+			if err != nil {
+				if err != concurrency.ErrElectionNoLeader {
+					return err
+				}
+				time.Sleep(time.Millisecond * 300)
+				continue
 			}
-			time.Sleep(time.Millisecond * 300)
-			continue
-		}
 
-		// check if the leader is itself
-		if string(resp.Kvs[0].Value) != host {
-			el.leaderCh <- false
-		} else {
-			if !el.recampaign {
-				el.leaderCh <- true
+			// check if the leader is itself
+			if string(resp.Kvs[0].Value) != host {
+				el.leaderCh <- false
+			} else {
+				if !el.recampaign {
+					el.leaderCh <- true
+				}
 			}
-		}
 
-		break
+			break
+		}
 	}
 
 	return nil
 }
 
-func (el *ElectLeader) electLoop(client *clientv3.Client, host, electKey string) error {
+func (el *ElectLeader) electLoop(client *clientv3.Client, host string) error {
 	var (
-		errCh   chan error
-		node    *clientv3.GetResponse
-		observe <-chan clientv3.GetResponse
-		err     error
-		recnt   int
+		errCh       chan error
+		node        *clientv3.GetResponse
+		observe     <-chan clientv3.GetResponse
+		err         error
+		recnt       int
+		notYetElect bool = true
 	)
 
 	el.wg.Add(1)
@@ -108,12 +114,13 @@ func (el *ElectLeader) electLoop(client *clientv3.Client, host, electKey string)
 					el.session.Close() // 先释放之前的session
 
 					// 依据session里old lease，重建自己为主的session
-					if err = el.newSession(client, node.Kvs[0].Lease, electKey); err != nil {
+					if err = el.newSession(client, node.Kvs[0].Lease, el.electKey); err != nil {
 						log.Printf("while re-establishing session with lease: %s\n", err)
 						goto reconnect
 					}
+
 					el.election = concurrency.ResumeElection(
-						el.session, electKey,
+						el.session, el.electKey,
 						string(node.Kvs[0].Key), node.Kvs[0].CreateRevision,
 					)
 
@@ -121,26 +128,30 @@ func (el *ElectLeader) electLoop(client *clientv3.Client, host, electKey string)
 					// we must skip the campaign call and go directly to observe when resuming
 					goto observe
 				} else {
-					// If resign takes longer than our TTL then lease is expired and we are no
-					// longer leader anyway.
-					// 无需恢复leader，则释放当前自己为leader
-					el.election = concurrency.ResumeElection(
-						el.session, electKey,
-						string(node.Kvs[0].Key), node.Kvs[0].CreateRevision,
-					)
+					// 尚未选举，且el.recampaign == true, 才释放掉自身的leader
+					if notYetElect {
+						// If resign takes longer than our TTL then lease is expired and we are no
+						// longer leader anyway.
+						// 无需恢复leader，则释放当前自己为leader
+						el.election = concurrency.ResumeElection(
+							el.session, el.electKey,
+							string(node.Kvs[0].Key), node.Kvs[0].CreateRevision,
+						)
 
-					ctx, cancel := context.WithTimeout(context.Background(), time.Duration(el.ttl)*time.Second)
-					err = el.election.Resign(ctx)
-					cancel()
+						ctx, cancel := context.WithTimeout(context.Background(), time.Duration(el.ttl)*time.Second)
+						err = el.election.Resign(ctx)
+						cancel()
 
-					if err != nil {
-						log.Printf("while resigning leadership after reconnect: %s\n", err)
-						goto reconnect
+						if err != nil {
+							log.Printf("while resigning leadership after reconnect: %s\n", err)
+							goto reconnect
+						}
 					}
 				}
 			}
 		}
 
+		notYetElect = false
 		// 选举之前先设置
 		el.setLeader(false)
 
@@ -214,7 +225,7 @@ func (el *ElectLeader) electLoop(client *clientv3.Client, host, electKey string)
 		for {
 			recnt = 0
 			el.session.Close() // 重连之前先释放之前的session
-			if err = el.newSession(client, 0, electKey); err != nil {
+			if err = el.newSession(client, 0, el.electKey); err != nil {
 				recnt++
 				log.Printf("while creating new session: %s\n", err)
 				if errors.Cause(err) == context.Canceled {
