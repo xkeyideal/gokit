@@ -40,6 +40,7 @@ func NewElectLeader(ttl int, recampaign bool, electKey string) *ElectLeader {
 	return &ElectLeader{
 		ttl:        ttl,
 		recampaign: recampaign,
+		electKey:   electKey,
 		isLeader:   false,
 		leaderCh:   make(chan bool, 1),
 		ctx:        ctx,
