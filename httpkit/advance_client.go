@@ -53,6 +53,42 @@ func NewAdvanceHttpClient(scheme, host string, connTimeout time.Duration, tlsCfg
 	}
 }
 
+func NewAdvanceHttpClientWithTransport(
+	scheme, host string, connTimeout time.Duration, tlsCfg *tls.Config,
+	transport http.RoundTripper,
+) *AdvanceHttpClient {
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	if transport != nil {
+		client.Transport = transport
+	} else {
+		client.Transport = &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   connTimeout,
+				KeepAlive: 30 * time.Second,
+				DualStack: true,
+			}).DialContext,
+
+			TLSClientConfig:       tlsCfg,
+			DisableKeepAlives:     false,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		}
+	}
+
+	return &AdvanceHttpClient{
+		scheme: scheme,
+		host:   host,
+		client: client,
+	}
+}
+
 type AdvanceSettings struct {
 	readWriteTimeout  time.Duration
 	path              string

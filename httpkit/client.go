@@ -76,6 +76,49 @@ func NewHttpClient(rwTimeout time.Duration, retry int,
 	}
 }
 
+func NewHttpClientWithTransport(rwTimeout time.Duration, retry int,
+	retryInterval, connTimeout time.Duration, tlsCfg *tls.Config,
+	transport http.RoundTripper,
+	retryHttpStatuses ...int,
+) *HttpClient {
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	if transport != nil {
+		client.Transport = transport
+	} else {
+		client.Transport = &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   connTimeout,
+				KeepAlive: 30 * time.Second,
+				DualStack: true,
+			}).DialContext,
+
+			TLSClientConfig:       tlsCfg,
+			DisableKeepAlives:     false,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		}
+	}
+
+	return &HttpClient{
+		c:                 client,
+		params:            url.Values{},
+		headers:           http.Header{},
+		rwTimeout:         rwTimeout,
+		baseAuth:          false,
+		gzip:              false,
+		retry:             retry,
+		retryInterval:     retryInterval,
+		retryHttpStatuses: retryHttpStatuses,
+	}
+}
+
 func (client *HttpClient) EnableGZip(gzip bool) *HttpClient {
 	client.gzip = gzip
 	return client
