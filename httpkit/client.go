@@ -7,7 +7,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -189,7 +188,7 @@ func (client *HttpClient) SetBasicAuth(username, password string) *HttpClient {
 }
 
 func (client *HttpClient) SetBody(body io.Reader) *HttpClient {
-	rawBody, _ := ioutil.ReadAll(body)
+	rawBody, _ := io.ReadAll(body)
 	client.body = bytes.NewBuffer(rawBody)
 	client.rawBody = rawBody
 	return client
@@ -198,30 +197,56 @@ func (client *HttpClient) SetBody(body io.Reader) *HttpClient {
 func (client *HttpClient) Get(targetUrl string) (*AdvanceResponse, error) {
 	client.body = nil
 	client.rawBody = []byte{}
-	return client.do("GET", targetUrl)
+	return client.do(context.Background(), "GET", targetUrl)
 }
 
 func (client *HttpClient) Post(targetUrl string) (*AdvanceResponse, error) {
-	return client.do("POST", targetUrl)
+	return client.do(context.Background(), "POST", targetUrl)
 }
 
 func (client *HttpClient) Put(targetUrl string) (*AdvanceResponse, error) {
-	return client.do("PUT", targetUrl)
+	return client.do(context.Background(), "PUT", targetUrl)
 }
 
 func (client *HttpClient) Delete(targetUrl string) (*AdvanceResponse, error) {
-	return client.do("DELETE", targetUrl)
+	return client.do(context.Background(), "DELETE", targetUrl)
 }
 
 func (client *HttpClient) Head(targetUrl string) (*AdvanceResponse, error) {
-	return client.do("HEAD", targetUrl)
+	return client.do(context.Background(), "HEAD", targetUrl)
 }
 
 func (client *HttpClient) Do(method, targetUrl string) (*AdvanceResponse, error) {
-	return client.do(method, targetUrl)
+	return client.do(context.Background(), method, targetUrl)
 }
 
-func (client *HttpClient) genHttpRequest(method, targetUrl string) (*http.Request, error) {
+func (client *HttpClient) GetWithContext(ctx context.Context, targetUrl string) (*AdvanceResponse, error) {
+	client.body = nil
+	client.rawBody = []byte{}
+	return client.do(ctx, "GET", targetUrl)
+}
+
+func (client *HttpClient) PostWithContext(ctx context.Context, targetUrl string) (*AdvanceResponse, error) {
+	return client.do(ctx, "POST", targetUrl)
+}
+
+func (client *HttpClient) PutWithContext(ctx context.Context, targetUrl string) (*AdvanceResponse, error) {
+	return client.do(ctx, "PUT", targetUrl)
+}
+
+func (client *HttpClient) DeleteWithContext(ctx context.Context, targetUrl string) (*AdvanceResponse, error) {
+	return client.do(ctx, "DELETE", targetUrl)
+}
+
+func (client *HttpClient) HeadWithContext(ctx context.Context, targetUrl string) (*AdvanceResponse, error) {
+	return client.do(ctx, "HEAD", targetUrl)
+}
+
+func (client *HttpClient) DoWithContext(ctx context.Context, method, targetUrl string) (*AdvanceResponse, error) {
+	return client.do(ctx, method, targetUrl)
+}
+
+func (client *HttpClient) genHttpRequest(ctx context.Context, method, targetUrl string) (*http.Request, error) {
 	for _, code := range client.retryHttpStatuses {
 		if code <= 201 {
 			return nil, fmt.Errorf("设置的重试http状态码包含201及以下, %+v", client.retryHttpStatuses)
@@ -244,7 +269,7 @@ func (client *HttpClient) genHttpRequest(method, targetUrl string) (*http.Reques
 	u.RawQuery = client.params.Encode()
 	client.body = bytes.NewBuffer(client.rawBody)
 
-	req, err := http.NewRequest(method, u.String(), client.body)
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), client.body)
 	if err != nil {
 		return nil, err
 	}
@@ -272,8 +297,8 @@ func (client *HttpClient) genHttpRequest(method, targetUrl string) (*http.Reques
 	return req, nil
 }
 
-func (client *HttpClient) ToCurlCommand(method, targetUrl string) (string, error) {
-	req, err := client.genHttpRequest(method, targetUrl)
+func (client *HttpClient) ToCurlCommand(ctx context.Context, method, targetUrl string) (string, error) {
+	req, err := client.genHttpRequest(ctx, method, targetUrl)
 	if err != nil {
 		return "", err
 	}
@@ -286,7 +311,7 @@ func (client *HttpClient) ToCurlCommand(method, targetUrl string) (string, error
 	return cmd.String(), nil
 }
 
-func (client *HttpClient) do(method, targetUrl string) (*AdvanceResponse, error) {
+func (client *HttpClient) do(ctx context.Context, method, targetUrl string) (*AdvanceResponse, error) {
 	if client.retry <= 0 {
 		client.retry = 1
 	} else {
@@ -297,7 +322,7 @@ func (client *HttpClient) do(method, targetUrl string) (*AdvanceResponse, error)
 
 	startTime := time.Now()
 	for i := 0; i < client.retry; i++ {
-		err := client.doOnce(method, targetUrl, adresp)
+		err := client.doOnce(ctx, method, targetUrl, adresp)
 		if err != nil {
 			// 达到retry的次数
 			if i == client.retry-1 {
@@ -334,8 +359,8 @@ func (client *HttpClient) retryCheck(responseStatusCode int) bool {
 	return false
 }
 
-func (client *HttpClient) doOnce(method, targetUrl string, adresp *AdvanceResponse) error {
-	req, err := client.genHttpRequest(method, targetUrl)
+func (client *HttpClient) doOnce(ctx context.Context, method, targetUrl string, adresp *AdvanceResponse) error {
+	req, err := client.genHttpRequest(ctx, method, targetUrl)
 	if err != nil {
 		return err
 	}
@@ -343,11 +368,11 @@ func (client *HttpClient) doOnce(method, targetUrl string, adresp *AdvanceRespon
 	if client.rwTimeout > 0 {
 		ctx, cancel := context.WithTimeout(req.Context(), client.rwTimeout)
 		defer cancel()
+
 		req = req.WithContext(ctx)
 	}
 
 	resp, err := client.c.Do(req)
-
 	if err != nil {
 		return err
 	}
@@ -364,7 +389,7 @@ func (client *HttpClient) doOnce(method, targetUrl string, adresp *AdvanceRespon
 			return err
 		}
 
-		body, err := ioutil.ReadAll(reader)
+		body, err := io.ReadAll(reader)
 		if err != nil {
 			return err
 		}
@@ -373,7 +398,7 @@ func (client *HttpClient) doOnce(method, targetUrl string, adresp *AdvanceRespon
 		return nil
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}

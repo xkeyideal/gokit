@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -27,6 +28,8 @@ type TestData struct {
 	Email string `json:"email"`
 }
 
+var DefaultClient = &http.Client{}
+
 func main() {
 	client := httpkit.NewHttpClient(rwTimeout, retry, retryInterval, connTimout, nil, retryHttpStatuses...)
 
@@ -38,23 +41,38 @@ func main() {
 	client = client.SetHeader("Content-Type", "application/json").SetHeader("Auth-Token", "private-token")
 	client = client.SetBody(bytes.NewBuffer(jsonstr))
 
-	curl, err := client.ToCurlCommand(http.MethodPost, "http://10.181.23.180:12745/test")
+	curl, err := client.ToCurlCommand(context.Background(), http.MethodPost, "http://127.0.0.1:12745/test")
 	if err != nil {
 		panic(err)
 	}
 
 	log.Println(curl)
 
-	resp, err := client.Post("http://10.181.23.180:12745/test")
+	ctx := context.WithValue(context.Background(), "req.withcontext", "123456")
+
+	//resp, err := otelhttp.Post(ctx, "http://127.0.0.1:12745/test", "", bytes.NewBuffer(jsonstr))
+
+	// req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://127.0.0.1:12745/test", bytes.NewBuffer(jsonstr))
+	// if err != nil {
+	// 	panic(err)
+	// }
+
+	// resp, err := DefaultClient.Do(req)
+
+	resp, err := client.PostWithContext(ctx, "http://127.0.0.1:12745/test")
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
+	//defer resp.Body.Close()
+
 	if resp.StatusCode != 200 {
 		fmt.Printf("uri error: %s, code: %d", resp.Status, resp.StatusCode)
 		return
 	}
+
+	//body, _ := io.ReadAll(resp.Body)
 
 	fmt.Println(string(resp.Body))
 }
