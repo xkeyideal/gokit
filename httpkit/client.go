@@ -9,13 +9,11 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptrace"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/moul/http2curl"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -34,7 +32,6 @@ type HttpClient struct {
 	retry             int
 	retryInterval     time.Duration
 	retryHttpStatuses []int // 重试的http状态码
-	otelHttp          bool  // 支持opentelemetry otelhttptrace context inject
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -127,17 +124,17 @@ func (client *HttpClient) EnableGZip(gzip bool) *HttpClient {
 	return client
 }
 
-func (client *HttpClient) EnableOtelHttp(otelHttp bool) *HttpClient {
-	client.otelHttp = otelHttp
+func (client *HttpClient) EnableOtelHttp() *HttpClient {
 	client.c.Transport = otelhttp.NewTransport(
 		client.c.Transport,
 		// By setting the otelhttptrace client in this transport, it can be
 		// injected into the context after the span is started, which makes the
 		// httptrace spans children of the transport one.
-		otelhttp.WithClientTrace(func(ctx context.Context) *httptrace.ClientTrace {
-			return otelhttptrace.NewClientTrace(ctx)
-		}),
+		// otelhttp.WithClientTrace(func(ctx context.Context) *httptrace.ClientTrace {
+		// 	return otelhttptrace.NewClientTrace(ctx)
+		// }),
 	)
+
 	return client
 }
 
