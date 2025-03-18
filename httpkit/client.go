@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/moul/http2curl"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace"
 )
 
 type HttpClient struct {
@@ -31,6 +32,7 @@ type HttpClient struct {
 	retry             int
 	retryInterval     time.Duration
 	retryHttpStatuses []int // 重试的http状态码
+	otelHttp          bool  // 支持opentelemetry otelhttptrace context inject
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -120,6 +122,11 @@ func NewHttpClientWithTransport(rwTimeout time.Duration, retry int,
 
 func (client *HttpClient) EnableGZip(gzip bool) *HttpClient {
 	client.gzip = gzip
+	return client
+}
+
+func (client *HttpClient) EnableOtelHttp(otelHttp bool) *HttpClient {
+	client.otelHttp = otelHttp
 	return client
 }
 
@@ -292,6 +299,10 @@ func (client *HttpClient) genHttpRequest(ctx context.Context, method, targetUrl 
 
 	if client.baseAuth {
 		req.SetBasicAuth(client.baseAuthUsername, client.baseAuthPassword)
+	}
+
+	if client.otelHttp {
+		otelhttptrace.Inject(ctx, req)
 	}
 
 	return req, nil
