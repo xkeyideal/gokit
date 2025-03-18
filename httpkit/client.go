@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strings"
 	"time"
@@ -302,6 +303,8 @@ func (client *HttpClient) genHttpRequest(ctx context.Context, method, targetUrl 
 	}
 
 	if client.otelHttp {
+		ctx = httptrace.WithClientTrace(ctx, otelhttptrace.NewClientTrace(ctx))
+		req = req.WithContext(ctx)
 		otelhttptrace.Inject(ctx, req)
 	}
 
