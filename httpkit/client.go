@@ -16,6 +16,7 @@ import (
 
 	"github.com/moul/http2curl"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 type HttpClient struct {
@@ -128,6 +129,15 @@ func (client *HttpClient) EnableGZip(gzip bool) *HttpClient {
 
 func (client *HttpClient) EnableOtelHttp(otelHttp bool) *HttpClient {
 	client.otelHttp = otelHttp
+	client.c.Transport = otelhttp.NewTransport(
+		client.c.Transport,
+		// By setting the otelhttptrace client in this transport, it can be
+		// injected into the context after the span is started, which makes the
+		// httptrace spans children of the transport one.
+		otelhttp.WithClientTrace(func(ctx context.Context) *httptrace.ClientTrace {
+			return otelhttptrace.NewClientTrace(ctx)
+		}),
+	)
 	return client
 }
 
@@ -300,12 +310,6 @@ func (client *HttpClient) genHttpRequest(ctx context.Context, method, targetUrl 
 
 	if client.baseAuth {
 		req.SetBasicAuth(client.baseAuthUsername, client.baseAuthPassword)
-	}
-
-	if client.otelHttp {
-		ctx = httptrace.WithClientTrace(ctx, otelhttptrace.NewClientTrace(ctx))
-		req = req.WithContext(ctx)
-		otelhttptrace.Inject(ctx, req)
 	}
 
 	return req, nil
