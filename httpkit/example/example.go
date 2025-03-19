@@ -50,14 +50,16 @@ func main() {
 
 	ctx := context.WithValue(context.Background(), "req.withcontext", "123456")
 
-	//resp, err := otelhttp.Post(ctx, "http://127.0.0.1:12745/test", "", bytes.NewBuffer(jsonstr))
+	params := map[string]string{
+		"key":  "key",
+		"from": "from",
+		"to":   "to",
+	}
 
-	// req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://127.0.0.1:12745/test", bytes.NewBuffer(jsonstr))
-	// if err != nil {
-	// 	panic(err)
-	// }
-
-	// resp, err := DefaultClient.Do(req)
+	b, _ := json.Marshal(params)
+	client = client.SetParam("mode", "driving")
+	client = client.SetHeader("Content-Type", "application/json")
+	client = client.SetBody(bytes.NewBuffer(b))
 
 	resp, err := client.PostWithContext(ctx, "http://127.0.0.1:12745/test")
 	if err != nil {
@@ -65,14 +67,10 @@ func main() {
 		return
 	}
 
-	//defer resp.Body.Close()
-
 	if resp.StatusCode != 200 {
 		fmt.Printf("uri error: %s, code: %d", resp.Status, resp.StatusCode)
 		return
 	}
-
-	//body, _ := io.ReadAll(resp.Body)
 
 	fmt.Println(string(resp.Body))
 }

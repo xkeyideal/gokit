@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,44 +17,32 @@ type TestData struct {
 	Name string `json:"name"`
 }
 
-func test(w http.ResponseWriter, req *http.Request) {
-	log.Println("req.headers", req.Header)
-	ctx := req.Context()
-	log.Println("req.ctx.value", ctx.Value("req.withcontext"))
-}
-
 func main() {
-	http.HandleFunc("/test", test)
-	http.ListenAndServe(":12745", nil)
+	router = gin.Default()
+	router.POST("/test", func(c *gin.Context) {
+		log.Println("req.headers", c.Request.Header)
 
-	// router = gin.Default()
-	// router.POST("/test", func(c *gin.Context) {
-	// 	log.Println("req.headers", c.Request.Header)
-	// 	log.Println("contx", c.Request.Context())
-	// 	ctx := c.Request.Context()
-	// 	log.Println("req.ctx.value", ctx.Value("req.withcontext"))
+		bytes, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			panic("sdfsdf" + err.Error())
+			SetStrResp(http.StatusBadRequest, HTTP_BODY_ERR, err.Error(), "", c)
+			return
+		}
 
-	// 	bytes, err := io.ReadAll(c.Request.Body)
-	// 	if err != nil {
-	// 		panic("sdfsdf" + err.Error())
-	// 		SetStrResp(http.StatusBadRequest, HTTP_BODY_ERR, err.Error(), "", c)
-	// 		return
-	// 	}
+		log.Println("121221", string(bytes))
 
-	// 	log.Println("121221", string(bytes))
+		SetStrResp(400, 0, "OK", "123", c)
+	})
 
-	// 	SetStrResp(400, 0, "OK", "123", c)
-	// })
+	server = &http.Server{
+		Addr:    fmt.Sprintf("0.0.0.0:12745"),
+		Handler: router,
+	}
 
-	// server = &http.Server{
-	// 	Addr:    fmt.Sprintf("0.0.0.0:12745"),
-	// 	Handler: router,
-	// }
-
-	// if err := server.ListenAndServe(); err != nil {
-	// 	fmt.Println("listenAndServe error ", err.Error())
-	// 	os.Exit(-1)
-	// }
+	if err := server.ListenAndServe(); err != nil {
+		fmt.Println("listenAndServe error ", err.Error())
+		os.Exit(-1)
+	}
 }
 
 const (
